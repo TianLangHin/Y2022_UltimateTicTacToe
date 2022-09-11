@@ -142,9 +142,9 @@ class UltimateTicTacToe
 		else if (!side && lines.Any(m => m[0] == THEM && m[1] == THEM && m[2] == THEM))
 			large[move / 9] = THEM;
 
-		// Next player can play in any zone if the current small grid is completely occupied or large grid is filled
+		// Next player can play in any zone if the current or next small grid is completely occupied or large grid is filled
 		// Otherwise, the zone corresponds to the previous move's relative position within its small grid
-		int zone = (!small[move / 9].Any(m => m == NONE) || large[move % 9] != NONE) ? ZONE_ANY : move % 9;
+		int zone = (!small[move / 9].Any(m => m == NONE) || !small[move % 9].Any(m => m == NONE) || large[move % 9] != NONE) ? ZONE_ANY : move % 9;
 
 		return (small, large, zone);
 	}
@@ -253,19 +253,39 @@ class UltimateTicTacToe
 		// Positional scoring. The following work due to the fact that US = 1 and THEM = -1,
 		// so the opposing occupancies will subtract one another through addition, as intended
 
-		// This line multiplies the positional score by the SQ_BIG weight for the large grid
-		sqScore = SQ_BIG * (
-			(large[0] + large[2] + large[6] + large[8]) * CORNER + // corners: nw(0), ne(2), sw(6), se(8)
-			(large[1] + large[3] + large[5] + large[7]) * EDGE +   // edges:    n(1),  w(3),  e(5),  s(7)
-			large[4] * CENTRE                                      // centre:   c(4)
-		);
+		// The following is inlined for faster evaluation
 
-		// Iterate through each small grid
-		for (i = 0; i < 9; ++i)
-			sqScore += (
-				(small[i][0] + small[i][2] + small[i][6] + small[i][8]) * CORNER + // corners: nw(0), ne(2), sw(6), se(8)
-				(small[i][1] + small[i][3] + small[i][5] + small[i][7]) * EDGE +   // edges:    n(1),  w(3),  e(5),  s(7)
-				small[i][4] * CENTRE                                               // centre:   c(4)
+		sqScore = CORNER * (
+				small[0][0] + small[0][2] + small[0][6] + small[0][8] +
+				small[1][0] + small[1][2] + small[1][6] + small[1][8] +
+				small[2][0] + small[2][2] + small[2][6] + small[2][8] +
+				small[3][0] + small[3][2] + small[3][6] + small[3][8] +
+				small[4][0] + small[4][2] + small[4][6] + small[4][8] +
+				small[5][0] + small[5][2] + small[5][6] + small[5][8] +
+				small[6][0] + small[6][2] + small[6][6] + small[6][8] +
+				small[7][0] + small[7][2] + small[7][6] + small[7][8] +
+				small[8][0] + small[8][2] + small[8][6] + small[8][8]
+			) +
+			EDGE * (
+				small[0][1] + small[0][3] + small[0][5] + small[0][7] +
+				small[1][1] + small[1][3] + small[1][5] + small[1][7] +
+				small[2][1] + small[2][3] + small[2][5] + small[2][7] +
+				small[3][1] + small[3][3] + small[3][5] + small[3][7] +
+				small[4][1] + small[4][3] + small[4][5] + small[4][7] +
+				small[5][1] + small[5][3] + small[5][5] + small[5][7] +
+				small[6][1] + small[6][3] + small[6][5] + small[6][7] +
+				small[7][1] + small[7][3] + small[7][5] + small[7][7] +
+				small[8][1] + small[8][3] + small[8][5] + small[8][7]
+			) +
+			CENTRE * (
+				small[0][4] + small[1][4] + small[2][4] +
+				small[3][4] + small[4][4] + small[5][4] +
+				small[6][4] + small[7][4] + small[8][4]
+			) +
+			SQ_BIG * (
+				CORNER * (large[0] + large[2] + large[6] + large[8]) +
+				EDGE   * (large[1] + large[3] + large[5] + large[7]) +
+				CENTRE * large[4]
 			);
 
 		// Readjust for the side, due to the board not being colour agnostic
@@ -299,15 +319,15 @@ class UltimateTicTacToe
 		if (depth == 0)
 			return (Evaluate(board, side), new List<int>());
 
-		int eval;
+		int eval, length = moveList.Count();
 		List<int> pv = new List<int>(), line;
-		foreach (int move in moveList)
+		for (int i = 0; i < length; ++i)
 		{
 			// recursive minimax call, using negamax construct
-			(eval, line) = AlphaBeta(PlayMove(board, move, side), !side, depth-1, -beta, -alpha);
+			(eval, line) = AlphaBeta(PlayMove(board, moveList[i], side), !side, depth-1, -beta, -alpha);
 
 			eval = -eval; // Take the negative of the evaluation, as the returned eval is for the opposing player
-			line.Insert(0, move); // Insert current move to track the line being searched from above recursive call
+			line.Insert(0, moveList[i]); // Insert current move to track the line being searched from above recursive call
 
 			if (eval >= beta) // fail hard beta-cutoff
 				return (beta, line);
@@ -328,13 +348,13 @@ class UltimateTicTacToe
 		Console.WriteLine("---+---+---");
 		for (int i = 0; i < 81; i += 27)
 		{
-			// take the corresponding horizontal row of the large grid
+			// Take the corresponding horizontal row of the large grid
 			bigRow = new ArraySegment<int[]>(small, i/9, 3);
 
-			// the next three rows in output come from this large grid row
+			// The next three rows in output come from this large grid row
 			for (int j = 0; j < 9; j += 3)
 			{
-				// select top row, middle row, then bottom row from each of the grids
+				// Select top row, middle row, then bottom row from each of the grids
 				Console.WriteLine(string.Join("|",
 					(
 						from grid in bigRow select
@@ -344,6 +364,7 @@ class UltimateTicTacToe
 			}
 			Console.WriteLine("---+---+---");
 		}
+		// Print the large grid contents in groups of three, starting from nw-n-ne row to sw-s-se row
 		for (int i = 0; i < 3; ++i)
 			Console.WriteLine(string.Join("",
 				(from square in new ArraySegment<int>(large, 3*i, 3)
