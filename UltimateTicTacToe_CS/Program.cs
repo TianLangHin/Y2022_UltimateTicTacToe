@@ -54,7 +54,6 @@ class UltimateTicTacToe
 	// Internal representations for boards and moves
 	const int NONE = 0, US = 1, THEM = -1;
 	const int ZONE_ANY = 9;
-	const int NO_MOVE = 81;
 
 	int SEARCHING_DEPTH;
 
@@ -324,26 +323,31 @@ class UltimateTicTacToe
 	void PrintBoard(Board board)
 	{
 		string[] sqArr = {"NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"};
-		int[][] small = (int[][])board.Item1.Clone();
-		int[] large = (int[])board.Item2.Clone();
-		int zone = board.Item3;
+		(int[][] small, int[] large, int zone) = board;
 		ArraySegment<int[]> bigRow;
 		Console.WriteLine("---+---+---");
 		for (int i = 0; i < 81; i += 27)
 		{
+			// take the corresponding horizontal row of the large grid
 			bigRow = new ArraySegment<int[]>(small, i/9, 3);
+
+			// the next three rows in output come from this large grid row
 			for (int j = 0; j < 9; j += 3)
 			{
+				// select top row, middle row, then bottom row from each of the grids
 				Console.WriteLine(string.Join("|",
-					(from x in bigRow select string.Join("",
-						(from y in new ArraySegment<int>(x, j, 3) select y == US ? "X" : y == THEM ? "O" : ".")))));
+					(
+						from grid in bigRow select
+						string.Join("", (from smallRow in new ArraySegment<int>(grid, j, 3) select smallRow == US ? "X" : smallRow == THEM ? "O" : "."))
+					)
+				));
 			}
 			Console.WriteLine("---+---+---");
 		}
 		for (int i = 0; i < 3; ++i)
 			Console.WriteLine(string.Join("",
-				(from x in new ArraySegment<int>(large, 3*i, 3)
-					select x == US ? "X" : x == THEM ? "O" : ".")));
+				(from square in new ArraySegment<int>(large, 3*i, 3)
+					select square == US ? "X" : square == THEM ? "O" : ".")));
 		Console.WriteLine("ZONE: " + (zone == ZONE_ANY ? "ANY" : sqArr[zone]));
 	}
 
@@ -474,10 +478,14 @@ class Program
 	public static void Main(string[] args)
 	{
 		UltimateTicTacToe uttt = new UltimateTicTacToe();
+
+		// Input the depth for this AI to work at
 		int depth;
 		Console.Write("Depth: ");
 		while (!int.TryParse(Console.ReadLine(), out depth))
 			Console.Write("Depth: ");
+
+		// Press '1' for AI to play first ("X"), press '2' for AI to play second ("O")
 		char c;
 		while ((c = Console.ReadKey(true).KeyChar) != '1' && c != '2') {}
 		Console.WriteLine("Playing " + (c == '1' ? "X" : "O"));
