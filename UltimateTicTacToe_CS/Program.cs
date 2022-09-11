@@ -142,9 +142,9 @@ class UltimateTicTacToe
 		else if (!side && lines.Any(m => m[0] == THEM && m[1] == THEM && m[2] == THEM))
 			large[move / 9] = THEM;
 
-		// Next player can play in any zone if the current or next small grid is completely occupied or large grid is filled
+		// Next player can play in any zone if the next small grid is completely occupied or next large grid is filled
 		// Otherwise, the zone corresponds to the previous move's relative position within its small grid
-		int zone = (!small[move / 9].Any(m => m == NONE) || !small[move % 9].Any(m => m == NONE) || large[move % 9] != NONE) ? ZONE_ANY : move % 9;
+		int zone = (!small[move % 9].Any(m => m == NONE) || large[move % 9] != NONE) ? ZONE_ANY : move % 9;
 
 		return (small, large, zone);
 	}
