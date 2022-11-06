@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 // This program uses a bitboard-like representation to represent the state of the game.
 using Board = System.ValueTuple<ulong,ulong,ulong>;
@@ -34,62 +35,58 @@ The abbreviations for the 9 relative positions within a grid are represented by:
 Their corresponding numerical values are NW = 0, N = 1, NE = 2, W = 3, C = 4, E = 5, SW = 6, S = 7, SE = 8.
 
 ZN refers to zone in which the next player can play. It takes any of the above values, or the value ANY = 9.
+
+# refers to unused bits.
 */
 
-class UltimateTicTacToeBB
+class UT3B2
 {
-	// Weights for representing win, loss and draw outcomes
+	// Weights for representing win, loss and draw outcomes.
 	const int INFINITY = 1000000;
 	const int OUTCOME_WIN = INFINITY;
 	const int OUTCOME_DRAW = 0;
 	const int OUTCOME_LOSS = -INFINITY;
 
-	// Weights for to-be-completed line occupancies
+	// Weights for line scoring.
 	const int BIG_TWO_COUNT   = 90;
 	const int BIG_ONE_COUNT   = 20;
 	const int SMALL_TWO_COUNT = 8;
 	const int SMALL_ONE_COUNT = 1;
 
-	// Weights for positions of squares in grid
+	// Weights for positional scoring.
 	const int CENTRE = 9;
 	const int CORNER = 7;
 	const int EDGE   = 5;
 	const int SQ_BIG = 25;
 
-	// Internal representations for boards and moves
-	const int NONE = 0, US = 1, THEM = -1;
+	// Internal representation for *zone* value when the player can play in any zone.
 	const int ZONE_ANY = 9;
 
 	// Masks for use in changing bitboards
-	const ulong LINE = 0b_111UL;
-	const ulong CHUNK = 0b_111_111_111UL;
-	const ulong DBLCHUNK = 0b_111_111_111_111_111_111UL;
-	const ulong EXCLZONE = 0b_111111_0000_111111111_111111111_111111111_111111111_111111111_111111111UL;
+	const ulong LINE        = 0b_111UL;
+	const ulong CHUNK       = 0b_111_111_111UL;
+	const ulong DBLCHUNK    = 0b_111_111_111_111_111_111UL;
+	const ulong EXCLZONE    = 0b_111111_0000_111111111_111111111_111111111_111111111_111111111_111111111UL;
 	const ulong CORNER_MASK = 0b_101_000_101UL;
-	const ulong EDGE_MASK = 0b_010_101_010UL;
+	const ulong EDGE_MASK   = 0b_010_101_010UL;
 	const ulong CENTRE_MASK = 0b_000_010_000UL;
 
-	// Lookup table for population count, as only 9-bit integers will be using this table
+	// Lookup table for population count, as only 9-bit integers will be using this table.
 	int[] PopCount = new int[512];
 
+	// Variable to contain the searching depth of the main AlphaBeta call.
 	int SEARCHING_DEPTH;
 
 	// Initialise PopCount lookup table by inserting bit count of each number
-	// from 0 to 511 in the corresponding index in the array
-	public UltimateTicTacToeBB()
+	// from 0 to 511 in the corresponding index in the array.
+	public UT3B2()
 	{
 		for (int i = 0; i < 512; ++i)
-			PopCount[i] = (i & 1) +
-				((i >> 1) & 1) +
-				((i >> 2) & 1) +
-				((i >> 3) & 1) +
-				((i >> 4) & 1) +
-				((i >> 5) & 1) +
-				((i >> 6) & 1) +
-				((i >> 7) & 1) +
-				((i >> 8) & 1);
+			PopCount[i] = (i & 1) + ((i >> 1) & 1) + ((i >> 2) & 1) + ((i >> 3) & 1) +
+				((i >> 4) & 1) + ((i >> 5) & 1) + ((i >> 6) & 1) + ((i >> 7) & 1) + ((i >> 8) & 1);
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	ulong Lines(ulong grid)
 	{
 		// Returns an unsigned integer using LSH 24 bits in format:
@@ -152,10 +149,13 @@ class UltimateTicTacToeBB
 				for (i = 0; i < 63; ++i)
 					if (((data1 >> i) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
 						moveList.Add(i);
-				for (i = 0; i < 18; ++i)
-					if (((data2 >> i) & 1) == 0 && ((large >> (i/9 + 7)) & 1) == 0)
-						moveList.Add(i + 63);
+				for (; i < 81; ++i)
+					if (((data2 >> (i-63)) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
+						moveList.Add(i);
 				break;
+			// In the following, we will assume that the *zone* value given corresponds to a zone that
+			// does not correspond to an occupied space in the large grid.
+
 			// Zones S and SE have to be dealt with separately due to the Board format.
 			case 7: case 8:
 				zone *= 9; // Since only the value of 9*zone will be used from here on, update *zone* itself.
@@ -221,15 +221,17 @@ class UltimateTicTacToeBB
 		for (int i = 0; i < 24 && lineNotWon; i += 3)
 			if (((lines >> i) & LINE) == LINE) // The LSB 3 bits represents one of the eight lines in the zone.
 				lineNotWon = false;
+
+		// Change large grid contents by updating the correct section of *share*.
+		// The correct bit position is 36 bits from LSB, then 0 to 8 positions left depending on move,
+		// then shifted another 9 spaces if the line is made by player O.
 		if (!lineNotWon)
-			share |= 1UL << (36 + 9*side + move/9); // Update correct section of *share*.
+			share |= 1UL << (36 + 9*side + move/9);
 
-		int zone = move % 9; // Normally, the zone of the next move is determined by move % 9.
-
+		// Normally, the zone of the next move is determined by move % 9.
 		// However, if that corresponding zone is completely filled, or
 		// the large occupancy corresponding to the zone is occupied, then the player can move anywhere.
-		if (nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1)
-			zone = ZONE_ANY;
+		int zone = nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1 ? ZONE_ANY : move % 9;
 
 		share = (share & EXCLZONE) | ((ulong)zone << 54); // Put *zone* value into correct place in *share*.
 
@@ -418,7 +420,7 @@ class UltimateTicTacToeBB
 	}
 
 	// The main alpha-beta minimax function. Returns evaluation and principal variation.
-	ValueTuple<int,List<int>> AlphaBeta(Board board, int side, int depth, int alpha, int beta)
+	ValueTuple<int,int[]> AlphaBeta(Board board, int side, int depth, int alpha, int beta)
 	{
 		List<int> moveList = GenerateMoves(board); // Find all legal moves.
 
@@ -428,34 +430,38 @@ class UltimateTicTacToeBB
 			ulong themLines = Lines((board.Item3 >> 45) & CHUNK); // Find O large grid occupancies
 			// Switch perspective if needed
 			if (side == 1)
-				(usLines, themLines) = (themLines, usLines);
+			{
+				ulong temp = usLines;
+				usLines = themLines;
+				themLines = temp;
+			}
 			// Find any three-in-a-rows for both players
-			bool usWin = false, themWin = false;
-			for (int i = 0; i < 24; i += 3)
+			bool usNotWin = true, themNotWin = true;
+			for (int i = 0; i < 24 && usNotWin && themNotWin; i += 3)
 			{
 				if (((usLines >> i) & LINE) == LINE)
-					usWin = true;
+					usNotWin = false;
 				if (((themLines >> i) & LINE) == LINE)
-					themWin = true;
+					themNotWin = false;
 			}
 			return (
 				// Player is winning, so subtract the number of moves needed to reach the win.
 				// This is to help find the fastest way to win.
-				(usWin ? OUTCOME_WIN + depth - SEARCHING_DEPTH :
+				(!usNotWin ? OUTCOME_WIN + depth - SEARCHING_DEPTH :
 				// Player is losing, so subtract the number of moves need to reach the end.
 				// This is to help delay the loss as much as possible.
-				themWin ? OUTCOME_LOSS - depth + SEARCHING_DEPTH :
+				!themNotWin ? OUTCOME_LOSS - depth + SEARCHING_DEPTH :
 				// If neither has a three-in-a-row but the game is over, then it is a draw.
 				OUTCOME_DRAW),
-				new List<int>()); // Reached leaf node, so return empty PV.
+				new int[SEARCHING_DEPTH - depth]); // Reached leaf node, so return empty PV.
 		}
 
 		// Reached leaf node, so return static evaluation and empty PV.
 		if (depth == 0)
-			return (Evaluate(board, side), new List<int>());
+			return (Evaluate(board, side), new int[SEARCHING_DEPTH]);
 
 		int eval, length = moveList.Count();
-		List<int> pv = new List<int>(), line;
+		int[] pv = new int[SEARCHING_DEPTH], line;
 
 		// Iterate over all legal moves.
 		for (int i = 0; i < length; ++i)
@@ -465,7 +471,7 @@ class UltimateTicTacToeBB
 			// So, we take the negative of the evaluation.
 			eval = -eval;
 
-			line.Insert(0, moveList[i]); // Record this move in the line.
+			line[SEARCHING_DEPTH - depth] = moveList[i]; // Record this move in the line.
 
 			if (eval >= beta) // Fail hard beta-cutoff
 				return (beta, line);
@@ -573,6 +579,7 @@ class UltimateTicTacToeBB
 			(eval > 0 ? "+" : "-") + Math.Abs(eval).ToString();
 	}
 
+	// The main game loop to be executed.
 	public void Main(int searchingDepth, bool selfStart)
 	{
 		SEARCHING_DEPTH = searchingDepth;
@@ -593,7 +600,7 @@ class UltimateTicTacToeBB
 		string[] strSplit;
 
 		int eval, move;
-		List<int> line;
+		int[] line;
 		List<string> strLines;
 
 		Stopwatch timer = new Stopwatch(); // The timer will show how many milliseconds each evaluation takes.
@@ -677,7 +684,7 @@ class Program
 {
 	public static void Main(string[] args)
 	{
-		UltimateTicTacToeBB ut3bb = new UltimateTicTacToeBB();
+		UT3B2 ut3b2 = new UT3B2();
 
 		// Input the depth for this program to work at.
 		int depth;
@@ -689,6 +696,6 @@ class Program
 		char c;
 		while ((c = Console.ReadKey(true).KeyChar) != '1' && c != '2') {}
 		Console.WriteLine("Playing " + (c == '1' ? "X" : "O"));
-		ut3bb.Main(depth, c == '1');
+		ut3b2.Main(depth, c == '1');
 	}
 }
