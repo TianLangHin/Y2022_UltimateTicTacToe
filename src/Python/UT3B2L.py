@@ -16,8 +16,8 @@ OUTCOME_WIN  = INFINITY
 OUTCOME_DRAW = 0
 OUTCOME_LOSS = -INFINITY
 
-BIG_TWO_COUNT  = 90
-BIG_ONE_COUNT  = 20
+BIG_TWO_COUNT   = 90
+BIG_ONE_COUNT   = 20
 SMALL_TWO_COUNT = 8
 SMALL_ONE_COUNT = 1
 
@@ -117,7 +117,7 @@ def generate_moves(board: Board) -> list[int]:
     move_list = []
     data1 = us | them
     data2 = ((share >> 18) | share) & DBLCHUNK
-    large = (share >> 36) | (share >> 45)
+    large = ((share >> 36) | (share >> 45)) & CHUNK
     zone = (share >> 54) & 0b1111
     match zone:
         # The number `9` is used to represent the ability to move to any zone.
@@ -285,6 +285,7 @@ def main():
     while c not in '12':
         c = input()
     self_start = c == '1'
+    print('Playing X' if self_start else 'Playing O')
 
     board = Board(0, 0, 9 << 54)
     player = False
@@ -347,6 +348,7 @@ def main():
             int(1000 * (e-s))
         ))
         print_board(board)
+
 
 if __name__ == '__main__':
     main()
