@@ -21,8 +21,8 @@ const ZONE_ANY: u64 = 9;
 
 const LINE: u64 = 0b111;
 const CHUNK: u64 = 0b111111111;
-const DBLCHUNK: u64 = 0b_111111111_111111111;
-const EXCLZONE: u64 = 0b_111111_0000_111111111_111111111_111111111_111111111_111111111_111111111;
+const DBLCHUNK: u64 = (CHUNK << 9) | CHUNK;
+const EXCLZONE: u64 = !(0b1111u64 << 54);
 const CORNER_MASK: u64 = 0b_101_000_101;
 const EDGE_MASK: u64 = 0b_010_101_010;
 const CENTRE_MASK: u64 = 0b_000_010_000;
@@ -64,22 +64,11 @@ const fn lines(grid: u64) -> u64 {
 fn init() -> (Vec<i32>, Vec<i32>) {
     let mut eval_table_large: Vec<i32> = vec![0; 262144];
     let mut eval_table_small: Vec<i32> = vec![0; 262144];
-    let mut pop_count: [i32; 512] = [0; 512];
-    for i in 0..512 {
-        pop_count[i] = ((i & 1)
-            + ((i >> 1) & 1)
-            + ((i >> 2) & 1)
-            + ((i >> 3) & 1)
-            + ((i >> 4) & 1)
-            + ((i >> 5) & 1)
-            + ((i >> 6) & 1)
-            + ((i >> 7) & 1)
-            + ((i >> 8) & 1)) as i32;
-    }
-    for u in 0..512 {
-        for t in 0..512 {
-            let us = u as u64;
-            let them = t as u64;
+    let pop_count: Vec<i32> = (0..512)
+        .map(|i| (0..9).fold(0, |acc, j| acc + ((i >> j) & 1)))
+        .collect();
+    for us in (0..512).map(|us| us as u64) {
+        for them in (0..512).map(|them| them as u64) {
             let mut eval_large: i32 = 0;
             let mut eval_small: i32 = 0;
             let us_lines = lines(us);
@@ -104,8 +93,7 @@ fn init() -> (Vec<i32>, Vec<i32>) {
                     2 => BIG_TWO_COUNT,
                     1 => BIG_ONE_COUNT,
                     _ => 0,
-                };
-                eval_large -= match them_count {
+                } - match them_count {
                     2 => BIG_TWO_COUNT,
                     1 => BIG_ONE_COUNT,
                     _ => 0,
@@ -114,8 +102,7 @@ fn init() -> (Vec<i32>, Vec<i32>) {
                     2 => SMALL_TWO_COUNT,
                     1 => SMALL_ONE_COUNT,
                     _ => 0,
-                };
-                eval_small -= match them_count {
+                } - match them_count {
                     2 => SMALL_TWO_COUNT,
                     1 => SMALL_ONE_COUNT,
                     _ => 0,
@@ -143,7 +130,7 @@ fn init() -> (Vec<i32>, Vec<i32>) {
             }
         }
     }
-    return (eval_table_large, eval_table_small);
+    (eval_table_large, eval_table_small)
 }
 
 fn generate_moves(board: Board) -> Box<dyn Iterator<Item = u64>> {
@@ -162,23 +149,23 @@ fn generate_moves(board: Board) -> Box<dyn Iterator<Item = u64>> {
             let data1 = us | them;
             let data2 = ((share >> 18) | share) & DBLCHUNK;
             let large = ((share >> 36) | (share >> 45)) & CHUNK;
-            Box::new((0..63)
-                .filter(move |i| {
-                    ((data1 >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
-                })
-                .chain((63..81).filter(move |i| {
-                    ((data2 >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
-                })))
+            Box::new(
+                (0..63)
+                    .filter(move |i| ((data1 >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0)
+                    .chain((63..81).filter(move |i| {
+                        ((data2 >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
+                    })),
+            )
         }
         7 | 8 => {
             let z = 9 * zone;
             let data2 = ((share >> 18) | share) & DBLCHUNK;
-            Box::new((z..z+9).filter(move |i| ((data2 >> (i - 63)) & 1) == 0))
+            Box::new((z..z + 9).filter(move |i| ((data2 >> (i - 63)) & 1) == 0))
         }
         _ => {
             let z = 9 * zone;
             let data1 = us | them;
-            Box::new((z..z+9).filter(move |i| ((data1 >> i) & 1) == 0))
+            Box::new((z..z + 9).filter(move |i| ((data1 >> i) & 1) == 0))
         }
     }
 }
@@ -211,7 +198,7 @@ fn play_move(board: Board, mv: u64, side: bool) -> Board {
     } else {
         mv % 9
     };
-    return (us, them, (share & EXCLZONE) | (zone << 54));
+    (us, them, (share & EXCLZONE) | (zone << 54))
 }
 
 fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 {
@@ -245,9 +232,7 @@ fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 {
                     tables.1[((them_data << 9) | us_data) as usize]
                 }
             }))
-            .fold(eval, |acc, x| {
-                acc + x
-            }),
+            .fold(eval, |acc, x| acc + x),
     )
 }
 
@@ -260,7 +245,6 @@ fn alpha_beta(
     tables: &(Vec<i32>, Vec<i32>),
     max_depth: usize,
 ) -> (i32, Vec<u64>) {
-
     let (_us, _them, share) = board;
     if depth == 0 {
         return (evaluate(board, side, tables), vec![0; max_depth]);
@@ -293,10 +277,10 @@ fn alpha_beta(
                 break;
             }
         }
-        return (alpha, pv);
+        (alpha, pv)
     } else {
         let eval = toggle_eval(side, tables.0[((share >> 36) & DBLCHUNK) as usize]);
-        return match eval {
+        match eval {
             OUTCOME_WIN => (
                 eval - (max_depth - depth) as i32,
                 vec![0; max_depth - depth],
@@ -306,7 +290,7 @@ fn alpha_beta(
                 vec![0; max_depth - depth],
             ),
             _ => (OUTCOME_DRAW, vec![0; max_depth - depth]),
-        };
+        }
     }
 }
 
@@ -372,7 +356,11 @@ fn print_board(board: Board) {
 }
 
 fn move_string(mv: u64) -> String {
-    format!("{0}/{1}", ZONE_ARRAY_LOWER[(mv / 9) as usize], ZONE_ARRAY_LOWER[(mv % 9) as usize])
+    format!(
+        "{0}/{1}",
+        ZONE_ARRAY_LOWER[(mv / 9) as usize],
+        ZONE_ARRAY_LOWER[(mv % 9) as usize]
+    )
 }
 
 fn eval_string(eval: i32, max_depth: usize) -> String {
@@ -387,18 +375,19 @@ fn eval_string(eval: i32, max_depth: usize) -> String {
     }
 }
 
-fn input_player_move(possible_moves: &Vec<u64>) -> u64 {
+fn input_player_move(possible_moves: &[u64]) -> u64 {
     let mut input = String::new();
     loop {
         print!("Move: ");
         let _ = stdout().flush();
         if match stdin().read_line(&mut input) {
             Ok(_) => input.chars().filter(|&c| c == '/').count(),
-            Err(_) => continue
-        } != 1 {
+            Err(_) => continue,
+        } != 1
+        {
             continue;
         }
-        let mut components = input.trim().split("/");
+        let mut components = input.trim().split('/');
         let zone = components.next().unwrap();
         let square = components.next().unwrap();
         if !ZONE_ARRAY_LOWER.contains(&zone) || !ZONE_ARRAY_LOWER.contains(&square) {
@@ -413,9 +402,9 @@ fn input_player_move(possible_moves: &Vec<u64>) -> u64 {
                         return mv;
                     }
                 }
-                None => continue
-            }
-            None => continue
+                None => continue,
+            },
+            None => continue,
         }
     }
 }
@@ -429,23 +418,32 @@ fn main() {
         let _ = stdout().flush();
         match stdin().read_line(&mut input_depth) {
             Ok(_) => match input_depth.trim().parse::<usize>() {
-                Ok(d) => { depth = d; break; },
-                Err(_) => continue
-            }
-            Err(_) => continue
+                Ok(d) => {
+                    depth = d;
+                    break;
+                }
+                Err(_) => continue,
+            },
+            Err(_) => continue,
         }
-    };
+    }
     let mut c: String;
     let self_start: bool;
     loop {
         c = String::new();
         match stdin().read_line(&mut c) {
             Ok(_) => match c.trim() {
-                "1" => { self_start = true; break; }
-                "2" => { self_start = false; break; }
-                _ => continue
-            }
-            Err(_) => continue
+                "1" => {
+                    self_start = true;
+                    break;
+                }
+                "2" => {
+                    self_start = false;
+                    break;
+                }
+                _ => continue,
+            },
+            Err(_) => continue,
         }
     }
     if self_start {
@@ -468,14 +466,17 @@ fn main() {
             OUTCOME_LOSS,
             OUTCOME_WIN,
             &tables,
-            depth
+            depth,
         );
         let duration = start.elapsed().as_millis();
         board = play_move(board, line[0], false);
         println!(
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
-            line.iter().map(|m| move_string(*m)).collect::<Vec<_>>().join(", "),
+            line.iter()
+                .map(|m| move_string(*m))
+                .collect::<Vec<_>>()
+                .join(", "),
             eval_string(eval, depth),
             duration
         );
@@ -511,14 +512,17 @@ fn main() {
             OUTCOME_WIN,
             OUTCOME_LOSS,
             &tables,
-            depth
+            depth,
         );
         let duration = start.elapsed().as_millis();
         board = play_move(board, line[0], false);
         println!(
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
-            line.iter().map(|m| move_string(*m)).collect::<Vec<_>>().join(", "),
+            line.iter()
+                .map(|m| move_string(*m))
+                .collect::<Vec<_>>()
+                .join(", "),
             eval_string(eval, depth),
             duration
         );
