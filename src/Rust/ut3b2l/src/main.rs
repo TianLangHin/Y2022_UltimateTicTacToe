@@ -31,7 +31,7 @@ const ZONE_ARRAY_UPPER: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", 
 const ZONE_ARRAY_LOWER: [&str; 9] = ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"];
 
 #[inline(always)]
-fn toggle_shift(side: bool, num: u64) -> u64 {
+const fn toggle_shift(side: bool, num: u64) -> u64 {
     if side {
         num
     } else {
@@ -40,7 +40,7 @@ fn toggle_shift(side: bool, num: u64) -> u64 {
 }
 
 #[inline(always)]
-fn toggle_eval(side: bool, num: i32) -> i32 {
+const fn toggle_eval(side: bool, num: i32) -> i32 {
     if side {
         -num
     } else {
@@ -49,7 +49,7 @@ fn toggle_eval(side: bool, num: i32) -> i32 {
 }
 
 #[inline(always)]
-fn lines(grid: u64) -> u64 {
+const fn lines(grid: u64) -> u64 {
     (grid & 1) * 0b_000_100_000_000_100_000_000_100
         + ((grid >> 1) & 1) * 0b_000_000_000_000_010_000_100_000
         + ((grid >> 2) & 1) * 0b_100_000_000_000_001_100_000_000
@@ -146,7 +146,7 @@ fn init() -> (Vec<i32>, Vec<i32>) {
     return (eval_table_large, eval_table_small);
 }
 
-fn generate_moves(board: Board) -> Vec<u64> {
+fn generate_moves(board: Board) -> Box<dyn Iterator<Item = u64>> {
     let (us, them, share) = board;
     let data1 = lines((share >> 36) & CHUNK);
     let data2 = lines((share >> 45) & CHUNK);
@@ -154,54 +154,31 @@ fn generate_moves(board: Board) -> Vec<u64> {
         .step_by(3)
         .any(|i| ((data1 >> i) & LINE) == LINE || ((data2 >> i) & LINE) == LINE)
     {
-        return Vec::new();
+        return Box::new(0..0);
     }
-    let large = ((share >> 36) | (share >> 45)) & CHUNK;
     let zone = (share >> 54) & 0b1111;
     match zone {
         ZONE_ANY => {
             let data1 = us | them;
             let data2 = ((share >> 18) | share) & DBLCHUNK;
-            (0..63)
-                .filter_map(|i| {
-                    if ((data1 >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0 {
-                        Some(i)
-                    } else {
-                        None
-                    }
+            let large = ((share >> 36) | (share >> 45)) & CHUNK;
+            Box::new((0..63)
+                .filter(move |i| {
+                    ((data1 >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
                 })
-                .chain((63..81).filter_map(|i| {
-                    if ((data2 >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0 {
-                        Some(i)
-                    } else {
-                        None
-                    }
-                }))
-                .collect()
+                .chain((63..81).filter(move |i| {
+                    ((data2 >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
+                })))
         }
         7 | 8 => {
-            let data2 = (((share >> 18) | share) & DBLCHUNK) >> (zone * 9 - 63);
-            (0..9)
-                .filter_map(|i| {
-                    if ((data2 >> i) & 1) == 0 {
-                        Some(zone * 9 + i)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            let z = 9 * zone;
+            let data2 = ((share >> 18) | share) & DBLCHUNK;
+            Box::new((z..z+9).filter(move |i| ((data2 >> (i - 63)) & 1) == 0))
         }
         _ => {
-            let data1 = (us | them) >> (zone * 9);
-            (0..9)
-                .filter_map(|i| {
-                    if ((data1 >> i) & 1) == 0 {
-                        Some(zone * 9 + i)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            let z = 9 * zone;
+            let data1 = us | them;
+            Box::new((z..z+9).filter(move |i| ((data1 >> i) & 1) == 0))
         }
     }
 }
@@ -283,9 +260,41 @@ fn alpha_beta(
     tables: &(Vec<i32>, Vec<i32>),
     max_depth: usize,
 ) -> (i32, Vec<u64>) {
+
     let (_us, _them, share) = board;
-    let move_list = generate_moves(board);
-    if move_list.is_empty() {
+    if depth == 0 {
+        return (evaluate(board, side, tables), vec![0; max_depth]);
+    }
+
+    let mut move_list = generate_moves(board);
+    if let Some(mut mv) = move_list.next() {
+        let mut pv = vec![0; max_depth];
+        loop {
+            let (mut eval, mut line) = alpha_beta(
+                play_move(board, mv, side),
+                !side,
+                depth - 1,
+                -beta,
+                -alpha,
+                tables,
+                max_depth,
+            );
+            eval = -eval;
+            line[max_depth - depth] = mv;
+            if eval >= beta {
+                return (beta, line);
+            } else if eval > alpha {
+                alpha = eval;
+                pv = line;
+            }
+            if let Some(new_mv) = move_list.next() {
+                mv = new_mv;
+            } else {
+                break;
+            }
+        }
+        return (alpha, pv);
+    } else {
         let eval = toggle_eval(side, tables.0[((share >> 36) & DBLCHUNK) as usize]);
         return match eval {
             OUTCOME_WIN => (
@@ -299,30 +308,6 @@ fn alpha_beta(
             _ => (OUTCOME_DRAW, vec![0; max_depth - depth]),
         };
     }
-    if depth == 0 {
-        return (evaluate(board, side, tables), vec![0; max_depth]);
-    }
-    let mut pv = vec![0; max_depth];
-    for mv in move_list {
-        let (mut eval, mut line) = alpha_beta(
-            play_move(board, mv, side),
-            !side,
-            depth - 1,
-            -beta,
-            -alpha,
-            tables,
-            max_depth,
-        );
-        eval = -eval;
-        line[max_depth - depth] = mv;
-        if eval >= beta {
-            return (beta, line);
-        } else if eval > alpha {
-            alpha = eval;
-            pv = line;
-        }
-    }
-    return (alpha, pv);
 }
 
 fn print_board(board: Board) {
@@ -502,7 +487,7 @@ fn main() {
     print_board(board);
 
     loop {
-        let possible_moves = generate_moves(board);
+        let possible_moves: Vec<u64> = generate_moves(board).collect();
         if possible_moves.is_empty() {
             println!("Game over");
             let mut _stop = String::new();
@@ -512,7 +497,7 @@ fn main() {
         let mv = input_player_move(&possible_moves);
         board = play_move(board, mv, player);
         print_board(board);
-        if generate_moves(board).is_empty() {
+        if generate_moves(board).collect::<Vec<u64>>().is_empty() {
             println!("Game over");
             let mut _stop = String::new();
             let _ = stdin().read_line(&mut _stop);
