@@ -3,44 +3,55 @@ from typing import Optional
 import time
 
 # us: int, them: int, share: int
+Board = namedtuple('Board', ['us', 'them', 'share'])
 # The bitboard-like representation here attempts to be as consistent
 # with other implementations as much as possible, such that
 # `us`, `them` and `share` should be 64-bit integers,
 # though native Python int does not enable a fine control over this.
-Board = namedtuple('Board', ['us', 'them', 'share'])
+# Native Python int is chosen as the data type regardless,
+# to enable quicker access to the values.
+
 
 # The following are defined as global constants to make the code
 # more readable, while some values have been inlined for use in match statements.
+
+# Weights for representing win, loss and draw outcomes.
 INFINITY     = 1000000
 OUTCOME_WIN  = INFINITY
 OUTCOME_DRAW = 0
 OUTCOME_LOSS = -INFINITY
 
+# Weights for line scoring.
 BIG_TWO_COUNT   = 90
 BIG_ONE_COUNT   = 20
 SMALL_TWO_COUNT = 8
 SMALL_ONE_COUNT = 1
 
+# Weights for positional scoring.
 CENTRE = 9
 CORNER = 7
 EDGE   = 5
 SQ_BIG = 25
 
+# Masks for use in changing bitboards.
 LINE     = 0b111
 CHUNK    = 0b111_111_111
 DBLCHUNK = (CHUNK << 9) | CHUNK
 EXCLZONE = (0b111111 << 58) | ((1 << 54) - 1)
-
 CORNER_MASK = 0b101_000_101
 EDGE_MASK   = 0b010_101_010
 CENTRE_MASK = 0b000_010_000
 
 # Precomputed values for the heuristic function
-# are not stored as global values, to ensure faster access.
+# are not stored as global values, to enable faster access.
 
 # This function is to be executed at the very start, and only once,
 # to populate the lists to be used in the heuristic evaluation.
 def init() -> (list[int], list[int]):
+    # These lookup tables store evaluations for different arrangements of grids,
+    # for both small and large grid metrics.
+    # These tables will essentially store partial heuristic evaluations
+    # for all possible small grid arrangements in the game.
     eval_table_large = [0] * 262144
     eval_table_small = [0] * 262144
     pop_count = [0] * 512
@@ -90,6 +101,11 @@ def init() -> (list[int], list[int]):
 
 # Stores the occupancies of each of the eight lines in a 3x3 grid
 # in the form of 24 bits, interpreted as eight sets of 3 bits.
+# Every set of three bits in the returned value represents the occupancies
+# of each of the eight lines in a 3x3 grid.
+# Using the values internally representing each of the 9 zones, this function returns
+# an unsigned integer with the least significant 24 bits in the format:
+# 246 048 678 345 012 258 147 036.
 def lines(grid: int) -> int:
     return (
         ((grid >> 0) & 1) * 0b_000_100_000_000_100_000_000_100 +
@@ -109,80 +125,146 @@ def lines(grid: int) -> int:
 
 def generate_moves(board: Board) -> list[int]:
     us, them, share = board
-    data1 = lines((share >> 36) & CHUNK)
-    data2 = lines((share >> 45) & CHUNK)
+    data1 = lines((share >> 36) & CHUNK) # Contains all big grid lines for X
+    data2 = lines((share >> 45) & CHUNK) # Contains all big grid lines for O
+
+    # If either X or O has made a big grid three-in-a-row, the game is over.
     for i in range(0, 24, 3):
         if ((data1 >> i) & LINE) == LINE or ((data2 >> i) & LINE) == LINE:
             return []
+
+    # List for all legal moves, to be returned.
     move_list = []
-    data1 = us | them
-    data2 = ((share >> 18) | share) & DBLCHUNK
-    large = ((share >> 36) | (share >> 45)) & CHUNK
+
+    # Here, we reuse `data1` and `data2` variables.
+    data1 = us | them                               # Contains all occupancies in zones NW to SW
+    data2 = ((share >> 18) | share) & DBLCHUNK      # Contains all occupancies in zones S to SE
+    large = ((share >> 36) | (share >> 45)) & CHUNK # Contains all occupancies in big grid
+
+    # Extract the zone to be played from the board.
     zone = (share >> 54) & 0b1111
+
     match zone:
         # The number `9` is used to represent the ability to move to any zone.
         case 9:
+            # If the player is allowed to play in any zone they wish, select all blank squares
+            # that are not in a zone that has a corresponding occupied large grid.
+
+            # Since some of the zones are stored in separate fields of Board,
+            # two separate iterations are needed to cover all squares.
             move_list.extend(
                 i for i in range(63)
                 if not (((data1 >> i) & 1) or ((large >> (i//9)) & 1)))
             move_list.extend(
                 i for i in range(63, 81)
                 if not (((data2 >> (i-63)) & 1) or ((large >> (i//9)) & 1)))
+
+        # In the following, we will assume that the *zone* value given corresponds to a zone that
+        # does not correspond to an occupied space in the large grid.
+
+        # Zones S and SE are stored in `share`, rather than `us` and `them`.
         case 7 | 8:
+            # We only use the value of 9*zone from here on, hence we update `zone` itself.
             zone *= 9
+            # Bitshift so that the nine least significant bits of `data2`
+            # represent the relevant zone.
             data2 >>= zone - 63
             move_list.extend(zone + i for i in range(9) if not ((data2 >> i) & 1))
+
         case _:
+            # We only use the value of 9*zone from here on, hence we update `zone` itself.
             zone *= 9
+            # Bitshift so that the nine least significant bits of `data1`
+            # represent the relevant zone.
             data1 >>= zone
             move_list.extend(zone + i for i in range(9) if not ((data1 >> i) & 1))
+
     return move_list
 
+# For a given move played by a given player, returns the new board state.
+# Does not mutate the board object passed to this function.
 def play_move(board: Board, move: int, side: bool) -> Board:
     us, them, share = board
+
+    # `line_occupy` contains our line occupancies of the zone we place in this move.
     if move > 62:
+        # If the zone is S or SE, `share` is updated.
+        # O updates 18 bits to the left from where X updates.
+        # The switch between values of `18` and `0` are done using Python's "truthy" `and` operator.
         share |= 1 << (move - 63 + (side and 18))
         line_occupy = lines((share >> (9*(move // 9) - 63 + (side and 18))) & CHUNK)
     elif not side:
+        # If Player X is playing, `us` is updated.
         us |= 1 << move
         line_occupy = lines((us >> (9*(move // 9))) & CHUNK)
     else:
+        # If Player O is playing, `them` is updated.
         them |= 1 << move
         line_occupy = lines((them >> (9*(move // 9))) & CHUNK)
-    if move % 9 > 6:
+
+    # `next_chunk` contains the occupancies of the next zone to be played in.
+    if move % 9 > 6: # If the next zone is S or SE, we access `share`.
         next_chunk = ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK
-    else:
+    else: # Otherwise, we access `us` and `them`.
         next_chunk = ((us | them) >> (9*(move % 9))) & CHUNK
+
+    # Check whether any of the lines in the current zone have been won.
     line_won = any(((line_occupy >> i) & LINE) == LINE for i in range(0, 24, 3))
     if line_won:
+        # Update the large grid if this move wins a zone.
         share |= 1 << (36 + 9 * side + move // 9)
+
+    # The next zone is determined by `move % 9` if the target zone is not won or fully occupied,
+    # but the next move can be in any zone (represented as `9` internally) otherwise.
     if next_chunk == CHUNK or (((share | (share >> 9)) >> (36 + move % 9)) & 1):
         zone = 9
     else:
         zone = move % 9
+
     return Board(us, them, (share & EXCLZONE) | (zone << 54))
 
+# Heuristic for evaluating a particular board state for a given side.
+# This function uses the precomputed values stored in two lists, calculated upon program startup.
 def evaluate(board: Board, side: bool, *, tables: (list[int], list[int])) -> int:
+
     us, them, share = board
+
+    # We access the precomputed tables, passed as parameters to enable faster access.
     eval_table_large, eval_table_small = tables
+
+    # First, we check the evaluation of the large grid.
     eval = eval_table_large[(share >> 36) & DBLCHUNK]
+
+    # If the large grid has a definitive win or loss outcome, the game is over,
+    # and we toggle the win or loss to match with the side we are evaluating for.
     if eval == OUTCOME_WIN or eval == OUTCOME_LOSS:
+        # `(1 - (side << 1))` toggles the evaluation by multiplying
+        # by a factor of 1 if playing X, and -1 if playing O
         return eval * (1 - (side << 1))
+
     large = ((share >> 36) | (share >> 45)) & CHUNK
     if large == CHUNK:
         return OUTCOME_DRAW
+
+    # Now, we loop through each of the 9 zones.
     for i in range(9):
+        # We check for whether the zone is from NW to SW or S to SE with this if-statement.
         if i < 7:
             us_data = (us >> (9*i)) & CHUNK
             them_data = (them >> (9*i)) & CHUNK
         else:
             us_data = (share >> (9*i - 63)) & CHUNK
             them_data = (share >> (9*i - 45)) & CHUNK
+        # If the zone is completely filled or the corresponding spot in the large grid is filled,
+        # we do not score this zone.
         if (us_data | them_data) == CHUNK or ((large >> i) & 1):
             continue
+        # Add the component of the evaluation to the running total.
         eval += eval_table_small[(them_data << 9) | us_data]
+
     return eval * (1 - (side << 1))
 
+# The main alpha-beta minimax function. Returns evaluation and principal variation.
 def alpha_beta(
         board: Board,
         side: bool,
@@ -194,7 +276,10 @@ def alpha_beta(
         max_depth: int) -> (int, list[Optional[int]]):
 
     eval_table_large, eval_table_small = tables
+    # Retrieve the list of legal moves in this position.
     move_list = generate_moves(board)
+
+    # If there are no legal moves, the game is over.
     if not move_list:
         eval = eval_table_large[(board.share >> 36) & DBLCHUNK] * (1 - (side << 1))
         if eval == OUTCOME_WIN:
@@ -204,10 +289,16 @@ def alpha_beta(
         else:
             eval = OUTCOME_DRAW
         return eval, [None] * (max_depth - depth)
+
+    # Reached leaf node, so return static evaluation and empty PV.
     if depth == 0:
         return evaluate(board, side, tables=tables), [None] * max_depth
+
     pv = [None] * max_depth
+
+    # Iterate over all legal moves.
     for mv in move_list:
+        # Recursive minimax call, using negamax construct as evaluation is symmetric.
         eval, line = alpha_beta(
             play_move(board, mv, side),
             not side,
@@ -216,13 +307,17 @@ def alpha_beta(
             -alpha,
             tables=tables,
             max_depth=max_depth)
+
+        # So, we take the negative of the evaluation.
         eval = -eval
-        line[max_depth - depth] = mv
-        if eval >= beta:
+        line[max_depth - depth] = mv # Record this move in the line.
+
+        if eval >= beta: # Fail hard beta-cutoff
             return beta, line
-        elif eval > alpha:
+        elif eval > alpha: # New best move found
             alpha = eval
-            pv = line
+            pv = line # Update PV.
+
     return alpha, pv
 
 def print_board(board: Board):
@@ -289,7 +384,6 @@ def main():
 
     board = Board(0, 0, 9 << 54)
     player = False
-    print_board(board)
 
     eval_table_large, eval_table_small = init()
 
@@ -313,7 +407,8 @@ def main():
             int(1000 * (e-s))
         ))
         player = True
-        print_board(board)
+
+    print_board(board)
 
     while True:
         possible_moves = generate_moves(board)
@@ -348,7 +443,6 @@ def main():
             int(1000 * (e-s))
         ))
         print_board(board)
-
 
 if __name__ == '__main__':
     main()
