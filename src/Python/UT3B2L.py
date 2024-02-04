@@ -428,8 +428,8 @@ def main():
             board,
             not player,
             depth,
-            INFINITY,
             -INFINITY,
+            INFINITY,
             tables=(eval_table_large, eval_table_small),
             max_depth=depth
         )

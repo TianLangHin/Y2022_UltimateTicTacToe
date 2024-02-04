@@ -730,8 +730,8 @@ fn main() {
             board,
             !player,
             depth,
-            OUTCOME_WIN,
             OUTCOME_LOSS,
+            OUTCOME_WIN,
             &tables,
             depth,
         );
