@@ -9,38 +9,6 @@ record LineScorePair(int Score, int[] Line) {}
 // All three pieces of data do not use the bit reserved for the negative in 2's complement.
 record Board(long Us, long Them, long Share) {}
 
-/*
-The internal representation of Board is as follows:
-
-Item1 (us)    : # {-SW-X--} {--E-X--} {--C-X--} {--W-X--} {-NE-X--} {--N-X--} {-NW-X--}
-Bits used     : 1 <---9---> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-Item2 (them)  : # {-SW-O--} {--E-O--} {--C-O--} {--W-O--} {-NE-O--} {--N-O--} {-NW-O--}
-Bits used     : 1 <---9---> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-Item3 (share) : ###### {ZN} {-LG-O--} {-LG-X--} {-SE-O--} {--S-O--} {-SE-X--} {--S-X--}
-Bits used     : <-6--> <4-> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-X refers to Player 1 ("X" in board display represents Player 1 occupancy)
-O refers to Player 2 ("O" in board display represents Player 2 occupancy)
-
-LG refers to Large Grid, which is the larger grid in which a three-in-a-row is made to win the game.
-
-The abbreviations for the 9 relative positions within a grid are represented by:
-+----+----+----+
-| NW | N  | NE |
-+----+----+----+
-| W  | C  | E  |
-+----+----+----+
-| SW | S  | SE |
-+----+----+----+
-Their corresponding numerical values are NW = 0, N = 1, NE = 2, W = 3, C = 4, E = 5, SW = 6, S = 7, SE = 8.
-
-ZN refers to zone in which the next player can play. It takes any of the above values, or the value ANY = 9.
-
-# refers to unused bits.
-*/
-
 class UT3B2
 {
     // Weights for representing win, loss and draw outcomes.
@@ -61,7 +29,7 @@ class UT3B2
     final int EDGE   = 5;
     final int SQ_BIG = 25;
 
-    // Internal representation for *zone* value when the player can play in any zone.
+    // Internal representation for `zone` value when the player can play in any zone.
     final int ZONE_ANY = 9;
 
     // Masks for use in changing bitboards
@@ -96,7 +64,7 @@ class UT3B2
         boolean usWon, themWon;
 
         // Loop to fill in the PopCount table with the number of bits for a number *i*
-        // at the index *i* of *PopCount*.
+        // at the index `i` of `PopCount`.
         for (i = 0; i < 512; ++i)
             PopCount[i] = (i & 1) + ((i >> 1) & 1) + ((i >> 2) & 1) +
                           ((i >> 3) & 1) + ((i >> 4) & 1) + ((i >> 5) & 1) +
@@ -173,7 +141,7 @@ class UT3B2
     }
 
     long lines(long grid) {
-        // Returns an unsigned integer using LSH 24 bits in format:
+        // Returns an unsigned integer using the least significant 24 bits in format:
         // 246 048 678 345 012 258 147 036
         // Where 0 = NW, 1 = N, 2 = NE, 3 = W, 4 = C, 5 = E, 6 = SW, 7 = S, 8 = SE.
         // Each set of three bits represents the occupancies in a line in a 9-bit grid.
@@ -202,7 +170,7 @@ class UT3B2
 
         int i; // variable counter to be used potentially in multiple for loops in one pass
 
-        // The variables *data1* and *data2* are reused to save memory.
+        // The variables `data1` and `data2` are reused to save memory.
         // They serve different purposes in different parts of this function.
 
         long data1 = lines((share >> 36) & CHUNK); // Contains all big grid lines for X
@@ -236,7 +204,7 @@ class UT3B2
                     if (((data2 >> (i-63)) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
                         moveList.add(i);
                 break;
-            // In the following, we will assume that the *zone* value given corresponds to a zone that
+            // In the following, we will assume that the `zone` value given corresponds to a zone that
             // does not correspond to an occupied space in the large grid.
 
             // Zones S and SE have to be dealt with separately due to the Board format.
@@ -244,7 +212,7 @@ class UT3B2
                 // Since only the value of 9*zone will be used from here on, update *zone* itself.
                 zone *= 9;
                 // Bitshift right to make relevant zone equal to the LSB 9 bits.
-                // Since we are accessing *share*, we bishift right by 63 less.
+                // Since we are accessing `share`, we bishift right by 63 less.
                 data2 >>= zone - 63;
                 for (i = 0; i < 9; ++i)
                     if (((data2 >> i) & 1) == 0)
@@ -273,22 +241,22 @@ class UT3B2
         long lineOccupy; // This will contain our line occupancies of the zone we place in this move.
         long nextChunk;  // This will contain all occupancies of the next zone to play in.
 
-        // If in the zone S or SE, we update *share*. Otherwise, update *us* or *them*.
+        // If in the zone S or SE, we update `share`. Otherwise, update `us` or `them`.
         if (move > 62) {
             // The relevant position is the square number - 63, then 18 places further if O is playing.
             share |= 1L << (move - 63 + 18 * side);
-            // Relevant zone is INT(move / 9), so we bitshift by 9*zone - 63 to get correct zone,
+            // Relevant zone is INT(move / 9), so we bitshift by `9*zone - 63` to get correct zone,
             // once again offsetting by 18 if player O is playing.
             lineOccupy = lines((share >> (9 * (move / 9) - 63 + 18*side)) & CHUNK);
         }
         // Player X is playing.
         else if (side == 0) {
-            us |= 1L << move; // Update relevant position.
+            us |= 1L << move;
             lineOccupy = lines((us >> (9 * (move / 9))) & CHUNK); // Find lines in relevant zone for this move.
         }
         // Player O is playing.
         else {
-            them |= 1L << move; // Update relevant position.
+            them |= 1L << move;
             lineOccupy = lines((them >> (9 * (move / 9))) & CHUNK); // Find lines in relevant zone for this move.
         }
 
@@ -296,8 +264,8 @@ class UT3B2
         // whether the zone will be S to SE or otherwise needs to be considered,
         // due to the different locations of these zones in the Board representation.
         nextChunk = move % 9 > 6 ?
-            ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK : // overlap both players in *share*
-            ((us | them) >> (9*(move % 9))) & CHUNK; // combine both player occupations from *us* and *them*
+            ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK : // Access `share` if next zone is S or SE.
+            ((us | them) >> (9*(move % 9))) & CHUNK; // Access `us` and `them` otherwise.
 
         // For the lines in the zone we just filled, check to see if we have made a three-in-a-row.
         // This is the only thing we need to check as we are assuming that we are starting from
@@ -309,7 +277,7 @@ class UT3B2
             if (((lineOccupy >> i) & LINE) == LINE)
                 lineNotWon = false;
 
-        // Change large grid contents by updating the correct section of *share*.
+        // Change large grid contents by updating the correct section of `share`.
         // The correct bit position is 36 bits from LSB, then 0 to 8 positions left depending on move,
         // then shifted another 9 spaces if the line is made by player O.
         if (!lineNotWon)
@@ -318,31 +286,21 @@ class UT3B2
         // Normally, the zone of the next move is determined by move % 9.
         // However, if that corresponding zone is completely filled, or
         // the large occupancy corresponding to the zone is occupied, then the player can move anywhere.
-        int zone = nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1 ? ZONE_ANY : move % 9;
+        int zone = nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1 ?
+            ZONE_ANY :
+            move % 9;
 
-        // Put *zone* value into correct place in *share*.
-        share = (share & EXCLZONE) | ((long)zone << 54);
-
-        // Return board with new updated values.
-        return new Board(us, them, share);
+        // Return board with new updated values, putting `zone` value into the correct place in `share`.
+        return new Board(us, them, (share & EXCLZONE) | ((long)zone << 54));
     }
 
     // Heuristic for evaluating a particular board from the perspective of a particular side,
     // once the minimax reaches a depth = 0 or other leaf node.
-
-    // There are two components to this evaluation: line scoring and positional scoring.
-    // Line scoring gives a score for each line in the large grid and each of the smaller ones,
-    // scoring based on how many occupancies have been made by the player. A line is given no score
-    // if no three-in-a-row can be possible for the player.
-    // Positional scoring gives a score based purely on the position of the occupancy in the grid,
-    // that is, giving a score for a corner, edge or centre occupancy.
     int evaluate(Board board, int side) {
         long us = board.Us(), them = board.Them(), share = board.Share();
 
         // Throughout the function, the evaluation is calculated from the perspective of X.
-        // It is then flipped according to *side* at the end.
-
-        // Line scoring begins here.
+        // It is then flipped according to `side` at the end.
 
         int eval = EvalTableLarge[(int)((share >> 36) & DBLCHUNK)];
 
@@ -414,10 +372,11 @@ class UT3B2
 
             if (eval >= beta) // Fail hard beta-cutoff
                 return new LineScorePair(beta, line);
-            else if (eval > alpha) // New best move found
-            {
+            else if (eval > alpha) {
+                // Next best move found.
                 alpha = eval;
-                pv = line;    // Update PV.
+                // Update PV.
+                pv = line;
             }
         }
 
@@ -494,13 +453,6 @@ class UT3B2
         return sqArr[move / 9] + "/" + sqArr[move % 9];
     }
 
-    // The evaluation score is always outputted in the following format:
-    // The first character is one of the five:
-    // "+": Meaning the position is winning for the AI, and the following number is the score
-    // "-": Meaning the position is losing for the AI, and the following number is the score
-    // "W": Meaning the AI has found a forced win, and the following number is the number of moves in which it will happen
-    // "L": Meaning the AI has found the position to be a forced loss, and the following number is the number of moves in which it will happen
-    // "D": Meaning the AI has found a draw, and the following number is always 0.
     String evalString(int eval) {
         return (eval <= OUTCOME_LOSS + SEARCHING_DEPTH) ? "L" + (eval - OUTCOME_LOSS) :
             (eval >= OUTCOME_WIN - SEARCHING_DEPTH) ? "W" + (OUTCOME_WIN - eval) :
@@ -523,14 +475,10 @@ class UT3B2
         }
     }
 
-    // This function takes in the list of valid moves, and repeatedly prompts the player
-    // for a move until a valid one is inputted.
-    // This is made a separate function to prevent cluttering of the main game loop.
     int inputPlayerMove(ArrayList<Integer> possibleMoves, Scanner scan) {
         String strMove, zone, square;
         String[] strSplit;
 
-        // Move format is "{direction}/{direction}", where {direction} is one of: "nw", "n", "ne", "w", "c", "e", "sw", "s", "se".
         System.out.print("Move: ");
         strMove = scan.nextLine();
         while (strMove.compareTo("") == 0) {
@@ -573,7 +521,7 @@ class UT3B2
             0b0000001001000000000000000000000000000000000000000000000000000000L
         );
 
-        int player = 0;    // Player is playing X by default.
+        int player = 0; // Player is playing X by default.
 
         ArrayList<Integer> possibleMoves;
 
@@ -585,7 +533,7 @@ class UT3B2
 
         LineScorePair pair;
 
-         // *selfStart* is true if the program is to play the first move. The player is thus playing O.
+        // `selfStart` is true if the program is to play the first move. The player is thus playing O.
         if (selfStart) {
             // Output evaluation, PV and new board state.
             start = System.currentTimeMillis();
