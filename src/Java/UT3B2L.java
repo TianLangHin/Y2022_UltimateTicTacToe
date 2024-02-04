@@ -310,6 +310,9 @@ class UT3B2
         long usData, themData;
         long large = ((share >> 36) | (share >> 45)) & CHUNK;
 
+        if (large == CHUNK)
+            return OUTCOME_DRAW;
+
         int i;
         // Now, we loop through each of the 9 zones.
         for (i = 0; i < 9; ++i) {
