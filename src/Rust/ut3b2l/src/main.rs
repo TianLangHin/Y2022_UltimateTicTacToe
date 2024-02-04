@@ -43,6 +43,14 @@ const CENTRE_MASK: u64 = 0b_000_010_000;
 const ZONE_ARRAY_UPPER: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
 const ZONE_ARRAY_LOWER: [&str; 9] = ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"];
 
+// Since values 0-80 are best used for move representation,
+// 81 is used to represent a "null move".
+const NULL_MOVE: u64 = 81;
+
+// The absolute upper bound of total plies for this game is 81,
+// since there are exactly 81 places that can be played.
+const MAX_PLY: usize = 81;
+
 /**
  * Due to the potential unreadability of an if-block in an arithmetic expression,
  * the `toggle_shift` and `toggle_eval` functions provide functions to adjust
@@ -413,7 +421,7 @@ fn alpha_beta(
     beta: i32,
     tables: &(Vec<i32>, Vec<i32>),
     max_depth: usize,
-) -> (i32, Vec<u64>) {
+) -> (i32, [u64; MAX_PLY]) {
 
     // It is not always necessary to destructure the board,
     // as only one branch of this function uses one of the components as is.
@@ -422,7 +430,7 @@ fn alpha_beta(
     // Once `depth` reaches zero, we stop the search here at the leaf node
     // and return the static evaluation, as well as an empty PV.
     if depth == 0 {
-        return (evaluate(board, side, tables), vec![0; max_depth]);
+        return (evaluate(board, side, tables), [NULL_MOVE; MAX_PLY]);
     }
 
     // Since `generate_moves` returns an iterator
@@ -438,7 +446,7 @@ fn alpha_beta(
 
         // Initialise the container for the principal variation,
         // which will be updated as new better lines are found.
-        let mut pv = vec![0; max_depth];
+        let mut pv = [NULL_MOVE; MAX_PLY];
 
         // This is equivalent to a do-while loop,
         // since we have already accessed one element,
@@ -500,15 +508,15 @@ fn alpha_beta(
         match eval {
             OUTCOME_WIN => (
                 eval - (max_depth - depth) as i32,
-                vec![0; max_depth - depth],
+                [NULL_MOVE; MAX_PLY],
             ),
             OUTCOME_LOSS => (
                 eval + (max_depth - depth) as i32,
-                vec![0; max_depth - depth],
+                [NULL_MOVE; MAX_PLY],
             ),
             // If the large grid does not give a win or loss
             // but there are no legal moves, the game is drawn.
-            _ => (OUTCOME_DRAW, vec![0; max_depth - depth]),
+            _ => (OUTCOME_DRAW, [NULL_MOVE; MAX_PLY]),
         }
 
         // The above implicit returns.
@@ -695,6 +703,7 @@ fn main() {
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
             line.iter()
+                .take_while(|&&m| m != NULL_MOVE)
                 .map(|m| move_string(*m))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -741,6 +750,7 @@ fn main() {
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
             line.iter()
+                .take_while(|&&m| m != NULL_MOVE)
                 .map(|m| move_string(*m))
                 .collect::<Vec<_>>()
                 .join(", "),
