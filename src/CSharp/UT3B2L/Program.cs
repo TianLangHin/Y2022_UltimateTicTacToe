@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 // This program uses a bitboard-like representation to represent the state of the game.
 using Board = System.ValueTuple<ulong,ulong,ulong>;
 
-class UT3B2
+class UT3B2L
 {
     // Weights for representing win, loss and draw outcomes.
     const int INFINITY = 1000000;
@@ -47,7 +47,7 @@ class UT3B2
 
     // Initialise PopCount lookup table by inserting bit count of each number
     // from 0 to 511 in the corresponding index in the array.
-    public UT3B2()
+    public UT3B2L()
     {
         int[] PopCount = new int[512];
 
@@ -578,7 +578,7 @@ class Program
 {
     public static void Main(string[] args)
     {
-        UT3B2 ut3b2 = new UT3B2();
+        UT3B2L ut3b2l = new UT3B2L();
 
         // Input the depth for this program to work at.
         int depth;
@@ -590,6 +590,6 @@ class Program
         char c;
         while ((c = Console.ReadKey(true).KeyChar) != '1' && c != '2') {}
         Console.WriteLine("Playing " + (c == '1' ? "X" : "O"));
-        ut3b2.Main(depth, c == '1');
+        ut3b2l.Main(depth, c == '1');
     }
 }
