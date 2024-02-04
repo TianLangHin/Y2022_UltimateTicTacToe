@@ -7,38 +7,6 @@ using System.Runtime.CompilerServices;
 // This program uses a bitboard-like representation to represent the state of the game.
 using Board = System.ValueTuple<ulong,ulong,ulong>;
 
-/*
-The internal representation of Board is as follows:
-
-Item1 (us)    : # {-SW-X--} {--E-X--} {--C-X--} {--W-X--} {-NE-X--} {--N-X--} {-NW-X--}
-Bits used     : 1 <---9---> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-Item2 (them)  : # {-SW-O--} {--E-O--} {--C-O--} {--W-O--} {-NE-O--} {--N-O--} {-NW-O--}
-Bits used     : 1 <---9---> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-Item3 (share) : ###### {ZN} {-LG-O--} {-LG-X--} {-SE-O--} {--S-O--} {-SE-X--} {--S-X--}
-Bits used     : <-6--> <4-> <---9---> <---9---> <---9---> <---9---> <---9---> <---9--->
-
-X refers to Player 1 ("X" in board display represents Player 1 occupancy)
-O refers to Player 2 ("O" in board display represents Player 2 occupancy)
-
-LG refers to Large Grid, which is the larger grid in which a three-in-a-row is made to win the game.
-
-The abbreviations for the 9 relative positions within a grid are represented by:
-+----+----+----+
-| NW | N  | NE |
-+----+----+----+
-| W  | C  | E  |
-+----+----+----+
-| SW | S  | SE |
-+----+----+----+
-Their corresponding numerical values are NW = 0, N = 1, NE = 2, W = 3, C = 4, E = 5, SW = 6, S = 7, SE = 8.
-
-ZN refers to zone in which the next player can play. It takes any of the above values, or the value ANY = 9.
-
-# refers to unused bits.
-*/
-
 class UT3B2
 {
     // Weights for representing win, loss and draw outcomes.
@@ -155,7 +123,6 @@ class UT3B2
     {
         // Returns an unsigned integer using LSH 24 bits in format:
         // 246 048 678 345 012 258 147 036
-        // Where 0 = NW, 1 = N, 2 = NE, 3 = W, 4 = C, 5 = E, 6 = SW, 7 = S, 8 = SE.
         // Each set of three bits represents the occupancies in a line in a 9-bit grid.
         // The 24 bits thus contains information on all 8 possible lines.
         return (
@@ -175,15 +142,13 @@ class UT3B2
     // Only valid positions will be reached if the program only ever uses its own functions to
     // play moves on the boards.
 
-    // A move is represented as one integer, from 0 to 80 inclusive, representing one of the
-    // 81 possible squares that a player can place their token on.
     List<int> GenerateMoves(Board board)
     {
         (ulong us, ulong them, ulong share) = board;
 
         int i; // variable counter to be used potentially in multiple for loops in one pass
 
-        // The variables *data1* and *data2* are reused to save memory.
+        // The variables `data1` and `data2` are reused to save memory.
         // They serve different purposes in different parts of this function.
 
         ulong data1 = Lines((share >> 36) & CHUNK); // Contains all big grid lines for X
@@ -217,20 +182,22 @@ class UT3B2
                     if (((data2 >> (i-63)) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
                         moveList.Add(i);
                 break;
-            // In the following, we will assume that the *zone* value given corresponds to a zone that
+
+            // In the following, we will assume that the `zone` value given corresponds to a zone that
             // does not correspond to an occupied space in the large grid.
 
             // Zones S and SE have to be dealt with separately due to the Board format.
             case 7: case 8:
-                zone *= 9; // Since only the value of 9*zone will be used from here on, update *zone* itself.
+                zone *= 9; // Since only the value of `9*zone` will be used from here on, update `zone` itself.
                 // Bitshift right to make relevant zone equal to the LSB 9 bits.
-                data2 >>= zone - 63; // Since we are accessing *share*, we bishift right by 63 less.
+                data2 >>= zone - 63; // Since we are accessing `share`, we bishift right by 63 less.
                 for (i = 0; i < 9; ++i)
                     if (((data2 >> i) & 1) == 0)
                         moveList.Add(zone + i);
                 break;
+
             default:
-                zone *= 9; // Since only the value of 9*zone will be used from here on, update *zone* itself.
+                zone *= 9; // Since only the value of `9*zone` will be used from here on, update `zone` itself.
                 data1 >>= zone; // Bitshift right to make relevant zone equal to the LSB 9 bits.
                 for (i = 0; i < 9; ++i)
                     if (((data1 >> i) & 1) == 0)
@@ -255,18 +222,18 @@ class UT3B2
         {
             // The relevant position is the square number - 63, then 18 places further if O is playing.
             share |= 1UL << (move - 63 + 18*side);
-            // Relevant zone is INT(move / 9), so we bitshift by 9*zone - 63 to get correct zone,
+            // Relevant zone is INT(move / 9), so we bitshift by `9*zone - 63` to get correct zone,
             // once again offsetting by 18 if player O is playing.
             lines = Lines((share >> (9*(move / 9) - 63 + 18*side)) & CHUNK);
         }
         else if (side == 0) // Player X is playing.
         {
-            us |= 1UL << move; // Update relevant position.
+            us |= 1UL << move;
             lines = Lines((us >> (9*(move / 9))) & CHUNK); // Find lines in relevant zone for this move.
         }
         else // Player O is playing.
         {
-            them |= 1UL << move; // Update relevant position.
+            them |= 1UL << move;
             lines = Lines((them >> (9*(move / 9))) & CHUNK); // Find lines in relevant zone for this move.
         }
 
@@ -274,8 +241,8 @@ class UT3B2
         // whether the zone will be S to SE or otherwise needs to be considered,
         // due to the different locations of these zones in the Board representation.
         nextChunk = move % 9 > 6 ?
-            ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK : // overlap both players in *share*
-            ((us | them) >> (9*(move % 9))) & CHUNK; // combine both player occupations from *us* and *them*
+            ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK : // Access `share` if next zone is S or SE.
+            ((us | them) >> (9*(move % 9))) & CHUNK; // Access `us` and `them` otherwise.
 
         // For the lines in the zone we just filled, check to see if we have made a three-in-a-row.
         // This is the only thing we need to check as we are assuming that we are starting from
@@ -295,22 +262,16 @@ class UT3B2
         // Normally, the zone of the next move is determined by move % 9.
         // However, if that corresponding zone is completely filled, or
         // the large occupancy corresponding to the zone is occupied, then the player can move anywhere.
-        int zone = nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1 ? ZONE_ANY : move % 9;
+        int zone = nextChunk == CHUNK || (((share | (share >> 9)) >> (36 + move % 9)) & 1) == 1 ?
+            ZONE_ANY :
+            move % 9;
 
-        share = (share & EXCLZONE) | ((ulong)zone << 54); // Put *zone* value into correct place in *share*.
-
-        return (us, them, share); // Return board with new updated values.
+        // Return board with new updated values, putting `zone` value into the correct place in `share`.
+        return (us, them, (share & EXCLZONE) | ((ulong)zone << 54));
     }
 
     // Heuristic for evaluating a particular board from the perspective of a particular side,
     // once the minimax reaches a depth = 0 or other leaf node.
-
-    // There are two components to this evaluation: line scoring and positional scoring.
-    // Line scoring gives a score for each line in the large grid and each of the smaller ones,
-    // scoring based on how many occupancies have been made by the player. A line is given no score
-    // if no three-in-a-row can be possible for the player.
-    // Positional scoring gives a score based purely on the position of the occupancy in the grid,
-    // that is, giving a score for a corner, edge or centre occupancy.
     int Evaluate(Board board, int side)
     {
         (ulong us, ulong them, ulong share) = board;
