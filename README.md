@@ -83,7 +83,23 @@ after calculating 8 total moves (4 per player) ahead.
 
 ## Implementation
 
-This project is implemented in multiple languages to showcase different ways this goal can be achieved, and will be in folders of their own.
+This project is implemented in multiple languages to showcase different ways this goal can be achieved,
+and will be in folders of their own.
+
+The algorithms used are designed to be as similar and general as possible,
+though language-specific features that can optimise the program further are used when possible.
+
+Conceptually, they all utilise the underlying principle of first precomputing lookup tables of
+partial heuristics so minimise calculations on the fly, while using alpha-beta pruning together with
+minimax and leveraging the symmetric nature of the chosen heuristic function to calculate
+a given number of plies into the future to find the best move in a given position.
+
+All implementations also output both the evaluation of the position as well as the principal variation.
+
+The individual source code packages or files are given the designation `UT3B2L` (or the corresponding lowercase version) for a shorter package and filename.
+This designation is an abbreviated form of the leading letters in the name
+`Ultimate Tic-Tac-Toe Bit-Board Lookup`,
+referencing the way in which the game state is internally represented and the heuristics are calculated.
 
 In all languages, the board and moves are stored using an encoding as follows.
 
