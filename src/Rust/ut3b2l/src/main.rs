@@ -719,7 +719,7 @@ fn main() {
         let mv = input_player_move(&possible_moves);
         board = play_move(board, mv, player);
         print_board(board);
-        if generate_moves(board).collect::<Vec<u64>>().is_empty() {
+        if Option::is_none(&generate_moves(board).next()) {
             println!("Game over");
             let mut _stop = String::new();
             let _ = stdin().read_line(&mut _stop);
