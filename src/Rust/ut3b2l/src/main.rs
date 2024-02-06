@@ -1,3 +1,5 @@
+use auto_enums::auto_enum;
+
 use std::io::{stdin, stdout, Write};
 use std::time::Instant;
 
@@ -56,7 +58,8 @@ const MAX_PLY: usize = 81;
  * the `toggle_shift` and `toggle_eval` functions provide functions to adjust
  * a number based on a `bool` flag.
  */
-#[inline(always)]
+
+#[inline]
 const fn toggle_shift(side: bool, num: u64) -> u64 {
     // Returns either the given `u64` or `0`.
     if side {
@@ -66,7 +69,7 @@ const fn toggle_shift(side: bool, num: u64) -> u64 {
     }
 }
 
-#[inline(always)]
+#[inline]
 const fn toggle_eval(side: bool, num: i32) -> i32 {
     // Returns either the given `i32` or the negative of it.
     if side {
@@ -77,32 +80,48 @@ const fn toggle_eval(side: bool, num: i32) -> i32 {
 }
 
 /**
- * Stores the occupancies of each of the eight lines in a 3x3 grid
- * in the form of 24 bits, interpreted as eight sets of 3 bits.
- * Every set of three bits in the returned value represents the occupancies
- * of each of the eight lines in a 3x3 grid.
- * Using the values internally representing each of the 9 zones, this function returns
- * an unsigned integer with the least significant 24 bits in the format:
- * 246 048 678 345 012 258 147 036.
+ * A grid is represented by the least significant 9 bits in a `u64`.
+ * The lines in a grid are represented by the following combinations of zones:
+ * NW-N-NE, W-C-E, SW-S-SE, NW-W-SW, N-C-S, NE-E-SE, NW-C-SE, NE-C-SW.
  */
-#[inline(always)]
+
+// Returns a 24-bit value where each set of 3 bits
+// represents the occupancy pattern of that line.
+// A 1 bit means that particular position in that line is occupied.
+#[inline]
 const fn lines(grid: u64) -> u64 {
-    (grid & 1) * 0b_000_100_000_000_100_000_000_100
-        + ((grid >> 1) & 1) * 0b_000_000_000_000_010_000_100_000
-        + ((grid >> 2) & 1) * 0b_100_000_000_000_001_100_000_000
-        + ((grid >> 3) & 1) * 0b_000_000_000_100_000_000_000_010
-        + ((grid >> 4) & 1) * 0b_010_010_000_010_000_000_010_000
-        + ((grid >> 5) & 1) * 0b_000_000_000_001_000_010_000_000
-        + ((grid >> 6) & 1) * 0b_001_000_100_000_000_000_000_001
-        + ((grid >> 7) & 1) * 0b_000_000_010_000_000_000_001_000
-        + ((grid >> 8) & 1) * 0b_000_001_001_000_000_001_000_000
+    0b_000_100_000_000_100_000_000_100 * (grid & 1)
+    + 0b_000_000_000_000_010_000_100_000 * ((grid >> 1) & 1)
+    + 0b_100_000_000_000_001_100_000_000 * ((grid >> 2) & 1)
+    + 0b_000_000_000_100_000_000_000_010 * ((grid >> 3) & 1)
+    + 0b_010_010_000_010_000_000_010_000 * ((grid >> 4) & 1)
+    + 0b_000_000_000_001_000_010_000_000 * ((grid >> 5) & 1)
+    + 0b_001_000_100_000_000_000_000_001 * ((grid >> 6) & 1)
+    + 0b_000_000_010_000_000_000_001_000 * ((grid >> 7) & 1)
+    + 0b_000_001_001_000_000_001_000_000 * ((grid >> 8) & 1)
+}
+
+// Returns an 8-bit value that represents
+// the occupancy status of each line in a 3x3 grid
+// where a 1 bit means that line is formed.
+#[inline]
+const fn line_presence(grid: u64) -> bool {
+    0 != ((0b10110110 | ((grid & 1) * 0xff))
+        & (0b11101110 | (((grid >> 1) & 1) * 0xff))
+        & (0b01011110 | (((grid >> 2) & 1) * 0xff))
+        & (0b11110101 | (((grid >> 3) & 1) * 0xff))
+        & (0b00101101 | (((grid >> 4) & 1) * 0xff))
+        & (0b11011101 | (((grid >> 5) & 1) * 0xff))
+        & (0b01110011 | (((grid >> 6) & 1) * 0xff))
+        & (0b11101011 | (((grid >> 7) & 1) * 0xff))
+        & (0b10011011 | (((grid >> 8) & 1) * 0xff)))
 }
 
 /**
  * This function is to be executed at the very start, and only once,
  * to populate the lookup tables to be used in the heuristic evaluation.
  * Since each of the two lookup tables contain 262144 `i32` values,
- * Vec<i32> is returned instead of an array, to prevent stack overflow.
+ * Vec<i32> is returned instead of an array, to avoid stack overflow.
  */
 fn init() -> (Vec<i32>, Vec<i32>) {
     // These lookup tables store evaluations for different arrangements of grids,
@@ -116,31 +135,56 @@ fn init() -> (Vec<i32>, Vec<i32>) {
 
     let mut eval_table_large: Vec<i32> = vec![0; 262144];
     let mut eval_table_small: Vec<i32> = vec![0; 262144];
+
+    // For each integer from 0 to 511, record the number of 1 bits it has.
     let pop_count: Vec<i32> = (0..512)
         .map(|i| (0..9).fold(0, |acc, j| acc + ((i >> j) & 1)))
         .collect();
+
+    // We test all the possible arrangements, which is where
+    // `us` and `them` each take a value from 0 to 511 each.
     for us in (0..512).map(|us| us as u64) {
         for them in (0..512).map(|them| them as u64) {
+
+            // These evaluation values will be incrementally updated.
             let mut eval_large: i32 = 0;
             let mut eval_small: i32 = 0;
+
+            // Retrieve the lines that each side makes as a bit array,
+            // allowing the number of occupancies in each line to be found.
             let us_lines = lines(us);
             let them_lines = lines(them);
+
+            // Early escape boolean flags, since no more evaluation is needed
+            // if one particular side has made a 3-in-a-row.
             let mut us_won: bool = false;
             let mut them_won: bool = false;
+
+            // We process the bits returned from `lines` in groups of 3.
             for i in (0..24).step_by(3) {
+
+                // Count how many cells each side occupies in this line.
                 let us_count = pop_count[((us_lines >> i) & LINE) as usize];
                 let them_count = pop_count[((them_lines >> i) & LINE) as usize];
+
+                // If both sides already occupy a place in this line,
+                // this line is no longer winnable for either side.
                 if us_count != 0 && them_count != 0 {
                     continue;
                 }
+                // Player X has won a line: X wins this configuration already.
                 if us_count == 3 {
                     us_won = true;
                     break;
                 }
+                // Player O has won a line: O wins this configuration already.
                 if them_count == 3 {
                     them_won = true;
                     break;
                 }
+
+                // Add on scores for occupying more of a line for both sides.
+
                 eval_large += match us_count {
                     2 => BIG_TWO_COUNT,
                     1 => BIG_ONE_COUNT,
@@ -160,6 +204,8 @@ fn init() -> (Vec<i32>, Vec<i32>) {
                     _ => 0,
                 };
             }
+
+            // Add on scores for occupancies in certain positions.
             let eval_pos = CORNER
                 * (pop_count[(us & CORNER_MASK) as usize]
                     - pop_count[(them & CORNER_MASK) as usize])
@@ -170,6 +216,8 @@ fn init() -> (Vec<i32>, Vec<i32>) {
                     * (pop_count[(us & CENTRE_MASK) as usize]
                         - pop_count[(them & CENTRE_MASK) as usize]);
 
+            // Update large table with evaluation if a decisive result is reached,
+            // otherwise update both small and large table with suitable heuristics.
             if us_won {
                 eval_table_large[((them << 9) | us) as usize] = OUTCOME_WIN;
             } else if them_won {
@@ -183,8 +231,10 @@ fn init() -> (Vec<i32>, Vec<i32>) {
         }
     }
 
+    // Implicit return.
     (eval_table_large, eval_table_small)
 }
+
 
 /**
  * The functions below all assume that we are starting with a valid board position.
@@ -192,75 +242,50 @@ fn init() -> (Vec<i32>, Vec<i32>) {
  * to play moves on the boards.
  */
 
+
 // To avoid running `.collect()` once every time a move list is generated
 // only to be iterated over again in the functions it is used in,
-// this function instead returns an boxed iterator trait object.
-fn generate_moves(board: Board) -> Box<dyn Iterator<Item = u64>> {
-
+// this function instead returns an iterator trait object.
+// Uses the auto_enum crate to avoid using dynamic dispatch.
+#[auto_enum(Iterator)]
+fn generate_moves(board: Board) -> impl Iterator<Item = u64> {
     let (us, them, share) = board;
 
-    let data1 = lines((share >> 36) & CHUNK); // Contains all big grid lines for X
-    let data2 = lines((share >> 45) & CHUNK); // Contains all big grid lines for O
-
-    // If either X or O has made a big grid three-in-a-row, the game is over.
-    if (0..24)
-        .step_by(3)
-        .any(|i| ((data1 >> i) & LINE) == LINE || ((data2 >> i) & LINE) == LINE)
-    {
-        // No legal moves can be made when the game is over,
-        // so we return a boxed empty iterator.
-        return Box::new(0..0);
+    if line_presence(share >> 36) || line_presence(share >> 45) {
+        return std::iter::empty();
     }
 
     // Extract the zone to be played from the board.
     let zone = (share >> 54) & 0b1111;
 
-    // We will reuse the `data1` and `data2` variables as needed
-    // in this implicit returning match block.
-
-    // Additionally, since the moves themselves correspond to actual integers that
-    // can be used to directly access the bitboards, we only use filters and chains
-    // without needing to map the value being tested to another value.
-
+    // The moves themselves correspond to actual integers that access the bitboards directly,
+    // hence we avoid using `map`, instead only using `filter` and `chain`.
     match zone {
+
         // If the player is allowed to play in any zone they wish, select all blank squares
         // that are not in a zone that has a corresponding occupied large grid.
         ZONE_ANY => {
-
-            // `data1` stores the combined occupancies in the NW to SW zones.
-            // `data2` stores the combined occupancies in the S to SE zones.
-            // `large` stores the combined occupancies of the large grid.
-            let data1 = us | them;
-            let data2 = ((share >> 18) | share) & DBLCHUNK;
-            let large = ((share >> 36) | (share >> 45)) & CHUNK;
-
-            // To prevent evaluating an extra condition at each iteration to determine
-            // which identifier to access, two iterators are chained together.
-            // The first iterator goes through all cells in the NW to SW zones.
-            // The second iterator goes through all cells in the S to SE zones.
-            Box::new(
-                (0..63)
-                    .filter(move |i| ((data1 >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0)
-                    .chain((63..81).filter(move |i| {
-                        ((data2 >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
-                    })),
-            )
+            let nw_to_sw = us | them;
+            let s_to_se = (share >> 18) | share;
+            let large = (share >> 36) | (share >> 45);
+            
+            (0..63)
+                .filter(move |i| ((nw_to_sw >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0)
+                .chain((63..81).filter(move |i| {
+                    ((s_to_se >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
+                }))
         }
-        // For zones S and SE, we access `share`, reusing `data2`.
+
+        // For zones S and SE, we access `share`.
         7 | 8 => {
-            // We only use the value of `9 * zone` from here on,
-            // hence we only multiply once and shadow the previous value.
-            let zone = 9 * zone;
-            let data2 = ((share >> 18) | share) & DBLCHUNK;
-            Box::new((zone..zone + 9).filter(move |i| ((data2 >> (i - 63)) & 1) == 0))
+            let s_to_se = (share >> 18) | share;
+            (9 * zone..9 * zone + 9).filter(move |i| ((s_to_se >> (i - 63)) & 1) == 0)
         }
-        // For zones NW to SW, we access `us` and `them`, reusing `data1`.
+
+        // For zones NW to SW, we access `us` and `them`.
         _ => {
-            // We only use the value of `9 * zone` from here on,
-            // hence we only multiply once and shadow the previous value.
-            let zone = 9 * zone;
-            let data1 = us | them;
-            Box::new((zone..zone + 9).filter(move |i| ((data1 >> i) & 1) == 0))
+            let nw_to_sw = us | them;
+            (9 * zone..9 * zone + 9).filter(move |i| ((nw_to_sw >> i) & 1) == 0)
         }
     }
 }
@@ -276,61 +301,46 @@ fn play_move(board: Board, mv: u64, side: bool) -> Board {
     // so we create mutable copies of the `u64` components of the board.
     let (mut us, mut them, mut share) = board;
 
-    // `line_occupy` contains the lines occupied by the given side as a bit array
-    // after the correct part of the board has been updated by the given move and player.
+    // `line_occupancy` stores whether a line within the relevant zone is formed by us
+    // after this move is made.
 
-    // The number `62` is the highest value the internal representation of a move can take
-    // such that the move is made inside the NW to SW zones.
-
-    let line_occupy = if mv > 62 {
-        // Internally, `false` represents player X and `true` represents player O.
-        // The data for player O is 18 bits to the left of X,
-        // hence `toggle_shift` is used to toggle between the values of `0` and `18`.
+    let line_occupancy = if mv > 62 {
         share |= 1 << (mv - 63 + toggle_shift(side, 18));
 
         // implicit return in block
-        lines((share >> (9 * (mv / 9) - 63 + toggle_shift(side, 18))) & CHUNK)
+        line_presence(share >> (9 * (mv / 9) - 63 + toggle_shift(side, 18)))
     } else if !side {
         us |= 1 << mv;
 
         // implicit return in block
-        lines((us >> (9 * (mv / 9))) & CHUNK)
+        line_presence(us >> (9 * (mv / 9)))
     } else {
         them |= 1 << mv;
 
         // implicit return in block
-        lines((them >> (9 * (mv / 9))) & CHUNK)
+        line_presence(them >> (9 * (mv / 9)))
     };
+
+    // If this move forms a line in our zone, occupy the corresponding large grid.
+    if line_occupancy {
+        share |= 1 << (36 + toggle_shift(side, 9) + mv / 9);
+    }
 
     // `next_chunk` contains all occupancies of the zone we are moving next in.
     // The next zone to be played in is determined by the position of the current move
     // relative to other cells in its zone, found by `mv % 9`.
-
-    // The number `6` corresponds to zone SW, which is the highest value the
-    // internal representation of a zone can take such that it is within the NW to SW zones.
+    // This determines if we access `share` or `us` and `them`.
 
     let next_chunk = if mv % 9 > 6 {
-        // Access `share` if the next zone is S or SE.
         ((share | (share >> 18)) >> (9 * ((mv % 9) - 7))) & CHUNK
     } else {
-        // Access `us` and `them` otherwise.
         ((us | them) >> (9 * (mv % 9))) & CHUNK
     };
-
-    // Since we can assume that the function is given a valid position and move,
-    // whichever zone this move is playing in is assumed to not be occupied by
-    // the opponent yet, hence `line_occupy` only checks for our occupancies
-    // to see whether we make a line in this grid.
-    if (0..24)
-        .step_by(3)
-        .any(|i| ((line_occupy >> i) & LINE) == LINE)
-    {
-        share |= 1 << (36 + toggle_shift(side, 9) + mv / 9);
-    }
 
     // The next player is allowed to play in any zone if either:
     // the zone indicated by the most recent move corresponds to a large grid that is won,
     // or the zone is completely filled with zero vacant cells.
+
     let zone = if next_chunk == CHUNK || (((share | (share >> 9)) >> (36 + mv % 9)) & 1) == 1 {
         ZONE_ANY
     } else {
@@ -347,7 +357,6 @@ fn play_move(board: Board, mv: u64, side: bool) -> Board {
  * passed as a reference in its parameter.
  */
 fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 {
-
     let (us, them, share) = board;
 
     // First, check the evaluation of the large grid.
@@ -393,17 +402,14 @@ fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 {
                 let us_data = (share >> (9 * i - 63)) & CHUNK;
                 let them_data = (share >> (9 * i - 45)) & CHUNK;
 
-                // Zones that are comlpetely filled or correspond to an occupied large grid
-                // are not scored. Since the values are added,
-                // we return a zero for this situation.
                 if ((large >> i) & 1) == 1 || (us_data | them_data) == CHUNK {
                     0
                 } else {
-                    // Incrementally add the precomputed evaluation of the small grid.
                     tables.1[((them_data << 9) | us_data) as usize]
                 }
             }))
-            .fold(eval, |acc, x| acc + x), // Add all these values on to the large grid evaluation.
+            .fold(eval, |acc, x| acc + x),
+            // Finally, add the elements up on top of the scoring for the large grid.
     )
     // The above implicit returns.
 }
@@ -422,39 +428,29 @@ fn alpha_beta(
     tables: &(Vec<i32>, Vec<i32>),
     max_depth: usize,
 ) -> (i32, [u64; MAX_PLY]) {
-
     // It is not always necessary to destructure the board,
-    // as only one branch of this function uses one of the components as is.
+    // as only one branch of this function uses one of the components.
     // The board is otherwise passed as is.
 
-    // Once `depth` reaches zero, we stop the search here at the leaf node
-    // and return the static evaluation, as well as an empty PV.
+    // Leaf node returns static evaluation and empty PV.
     if depth == 0 {
         return (evaluate(board, side, tables), [NULL_MOVE; MAX_PLY]);
     }
 
-    // Since `generate_moves` returns an iterator
-    // which we only want to iterate through once, we first do one call to `.next()`
-    // to see if it is empty or not, before then consuming until `None`
-    // if an element was returned at all.
+    // Retrieve the iterator for move generation.
     let mut move_list = generate_moves(board);
 
-    // We retrieve an element once,
-    // and making the element binding mutable for successive updates
-    // when looping over all moves.
+    // Retrieve first element into mutable binding,
+    // branching immediately if `None` first (i.e. empty iterator)
     if let Some(mut mv) = move_list.next() {
 
-        // Initialise the container for the principal variation,
-        // which will be updated as new better lines are found.
+        // Initialise PV array that will be updated over iterations.
         let mut pv = [NULL_MOVE; MAX_PLY];
 
-        // This is equivalent to a do-while loop,
-        // since we have already accessed one element,
-        // we execute the body of the loop once, before looking for next elements.
+        // Equivalent to do-while loop.
         loop {
-            // For each move, do a recursive minimax call,
-            // swapping and negating `alpha` and `beta`
-            // as the heuristic is symmetric.
+
+            // Recursive alpha-beta call
             let (mut eval, mut line) = alpha_beta(
                 play_move(board, mv, side),
                 !side,
@@ -465,28 +461,23 @@ fn alpha_beta(
                 max_depth,
             );
 
-            // Hence, we also take the negative of the evaluation.
+            // Take the negative of the evaluation to adjust for our current side.
             eval = -eval;
 
             // Record this move in the line.
             line[max_depth - depth] = mv;
 
             if eval >= beta {
-                // Fail-hard beta cutoff:
-                // returns the bound as this line will never be searched again,
-                // since it is determined to be suboptimal.
+                // Fail-hard beta cutoff.
                 return (beta, line);
             } else if eval > alpha {
-                // New best move found.
+                // New best move found. Update PV.
                 alpha = eval;
-                // Update PV.
                 pv = line;
             }
 
-            // Here, we retrieve the next move, and break out of the loop
-            // when `None` is returned.
+            // Break out of loop if next move is None, update `mv` binding otherwise.
             if let Some(new_mv) = move_list.next() {
-                // Update the `mv` binding with the new returned move.
                 mv = new_mv;
             } else {
                 break;
@@ -506,14 +497,8 @@ fn alpha_beta(
         // If the outcome is decisive (win or lose), we scale it inwards
         // by the number of plies it will take to reach the conclusion.
         match eval {
-            OUTCOME_WIN => (
-                eval - (max_depth - depth) as i32,
-                [NULL_MOVE; MAX_PLY],
-            ),
-            OUTCOME_LOSS => (
-                eval + (max_depth - depth) as i32,
-                [NULL_MOVE; MAX_PLY],
-            ),
+            OUTCOME_WIN => (eval - (max_depth - depth) as i32, [NULL_MOVE; MAX_PLY]),
+            OUTCOME_LOSS => (eval + (max_depth - depth) as i32, [NULL_MOVE; MAX_PLY]),
             // If the large grid does not give a win or loss
             // but there are no legal moves, the game is drawn.
             _ => (OUTCOME_DRAW, [NULL_MOVE; MAX_PLY]),
@@ -523,9 +508,14 @@ fn alpha_beta(
     }
 }
 
+// Used to output an ASCII art representation of the board.
 fn print_board(board: Board) {
+    // Destructure and retrieve values from board.
     let (us, them, share) = board;
     let zone = (share >> 54) & 0b1111;
+
+    // Map each of the bits to the coresponding string representations.
+    // That is, "X" for Player X, "O" for Player O, and "." for non-occupied.
     let small = (0..63)
         .map(|i| {
             if ((us >> i) & 1) == 1 {
@@ -546,6 +536,8 @@ fn print_board(board: Board) {
             }
         }))
         .collect::<Vec<_>>();
+
+    // Similar mapping for large grid.
     let large = (0..9)
         .map(|i| {
             if ((share >> (i + 36)) & 1) == 1 {
@@ -557,6 +549,8 @@ fn print_board(board: Board) {
             }
         })
         .collect::<Vec<_>>();
+
+    // After organising occupancies into Vec, iterate through and print.
     println!("---+---+---");
     for i in (0..81).step_by(27) {
         for j in (0..9).step_by(3) {
@@ -584,6 +578,7 @@ fn print_board(board: Board) {
     );
 }
 
+// Converts a `u64` move representation to a string.
 fn move_string(mv: u64) -> String {
     format!(
         "{0}/{1}",
@@ -592,6 +587,7 @@ fn move_string(mv: u64) -> String {
     )
 }
 
+// Converts a `i32` heuristic evaluation value to a string.
 fn eval_string(eval: i32, max_depth: usize) -> String {
     if eval <= OUTCOME_LOSS + max_depth as i32 {
         format!("L{0}", eval - OUTCOME_LOSS)
@@ -604,11 +600,15 @@ fn eval_string(eval: i32, max_depth: usize) -> String {
     }
 }
 
+// Small routine to repeatedly prompt user for a move until it is a legal and valid move.
 fn input_player_move(possible_moves: &[u64]) -> u64 {
-    let mut input = String::new();
+    let mut input: String;
     loop {
+        input = String::new();
         print!("Move: ");
         let _ = stdout().flush();
+
+        // Ensure the move is in format "[something]/[something]"
         if match stdin().read_line(&mut input) {
             Ok(_) => input.chars().filter(|&c| c == '/').count(),
             Err(_) => continue,
@@ -619,14 +619,15 @@ fn input_player_move(possible_moves: &[u64]) -> u64 {
         let mut components = input.trim().split('/');
         let zone = components.next().unwrap();
         let square = components.next().unwrap();
-        if !ZONE_ARRAY_LOWER.contains(&zone) || !ZONE_ARRAY_LOWER.contains(&square) {
-            println!("[{zone}][{square}]");
-            continue;
-        }
+
+        // Extract the components of the format, then check if they are valid zones.
         match ZONE_ARRAY_LOWER.iter().position(|&z| z == zone) {
             Some(z) => match ZONE_ARRAY_LOWER.iter().position(|&s| s == square) {
                 Some(s) => {
+                    // Convert move string into `u64` representation.
                     let mv = 9 * z as u64 + s as u64;
+
+                    // Return the move if it is legal, otherwise prompt user again.
                     if possible_moves.contains(&mv) {
                         return mv;
                     }
@@ -639,6 +640,8 @@ fn input_player_move(possible_moves: &[u64]) -> u64 {
 }
 
 fn main() {
+
+    // Repeatedly prompt for searching depth.
     let mut input_depth: String;
     let depth: usize;
     loop {
@@ -656,6 +659,8 @@ fn main() {
             Err(_) => continue,
         }
     }
+
+    // Repeatedly prompt for "1" or "2" to determine playing side.
     let mut c: String;
     let self_start: bool;
     loop {
@@ -675,18 +680,25 @@ fn main() {
             Err(_) => continue,
         }
     }
+
+    // First display what side is being played.
     if self_start {
         println!("Playing X");
     } else {
         println!("Playing O");
     }
 
-    let mut board: Board = (0, 0, 9 << 54);
+    // Starting position allows you to play in any zone.
+    let mut board: Board = (0, 0, ZONE_ANY << 54);
     let player: bool;
 
+    // Initialise by precomputing values.
     let tables = init();
 
+    // If computer is playing X, then we do an extra iteration of alpha-beta
+    // before we start the main game loop.
     if self_start {
+        // Start the search while timing it.
         let start = Instant::now();
         let (eval, line) = alpha_beta(
             board,
@@ -699,6 +711,9 @@ fn main() {
         );
         let duration = start.elapsed().as_millis();
         board = play_move(board, line[0], false);
+
+        // NULL_MOVE is the placeholder in the later indexes of the PV array,
+        // so we read until we reach that sentinel value.
         println!(
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
@@ -710,14 +725,18 @@ fn main() {
             eval_string(eval, depth),
             duration
         );
+        // Represents the computer's opponent playing as O
         player = true;
     } else {
+        // Represents the computer's opponent playing as X
         player = false;
     }
 
+    // Show the board state right before the computer's opponent makes a move.
     print_board(board);
 
     loop {
+        // List all possible moves, then prompt until one of these moves is entered.
         let possible_moves: Vec<u64> = generate_moves(board).collect();
         if possible_moves.is_empty() {
             println!("Game over");
@@ -727,13 +746,19 @@ fn main() {
         }
         let mv = input_player_move(&possible_moves);
         board = play_move(board, mv, player);
+
+        // Show the board after the move is made.
         print_board(board);
+
+        // If there are no legal moves after the move is made, exit.
         if Option::is_none(&generate_moves(board).next()) {
             println!("Game over");
             let mut _stop = String::new();
             let _ = stdin().read_line(&mut _stop);
             break;
         }
+
+        // Start the search while timing it.
         let start = Instant::now();
         let (eval, line) = alpha_beta(
             board,
@@ -745,7 +770,10 @@ fn main() {
             depth,
         );
         let duration = start.elapsed().as_millis();
+
+        // Play the move.
         board = play_move(board, line[0], false);
+
         println!(
             "AI Move: {0} PV: [{1}] Eval: {2} Time elapsed: {3} ms",
             move_string(line[0]),
@@ -757,6 +785,8 @@ fn main() {
             eval_string(eval, depth),
             duration
         );
+
+        // Show board state after computer has made its move.
         print_board(board);
     }
 }
