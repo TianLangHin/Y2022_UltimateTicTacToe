@@ -76,7 +76,7 @@ fn print_board(board: Board) {
 }
 
 // Converts a `u64` move representation to a string.
-fn move_string(mv: u64) -> String {
+fn move_string(mv: Move) -> String {
     format!(
         "{0}/{1}",
         ZONE_ARRAY_LOWER[(mv / 9) as usize],
@@ -284,10 +284,14 @@ fn main() {
             }
             "go" => {
                 if command.is_empty() {
-                    println!("info string nodepth");
+                    println!("info error no depth");
                 }
                 let current_player = (history.len() & 1) == 0;
                 if let Ok(depth) = command[1].parse::<usize>() {
+                    if depth == 0 {
+                        println!("info error invalid depth");
+                        continue;
+                    }
                     let board = history.last().unwrap().0;
                     let start = Instant::now();
                     let (eval, line) = alpha_beta(
@@ -313,7 +317,7 @@ fn main() {
                     );
                     history.push((play_move(board, line[0], current_player), line[0]));
                 } else {
-                    println!("info string invaliddepth");
+                    println!("info error invalid depth");
                 }
             }
             "play" => {
@@ -321,7 +325,11 @@ fn main() {
                     println!("move invalid");
                     continue;
                 }
-                if let Some(mv) = move_from_string(&command[1]) {
+                if command[1] == "null" {
+                    let (last_board, last_move) = *history.last().clone().unwrap();
+                    history.push((last_board, last_move));
+                    println!("move pos {}", board_string(last_board));
+                } else if let Some(mv) = move_from_string(&command[1]) {
                     let board = history.last().unwrap().0;
                     if Option::is_some(&generate_moves(board).find(|&m| m == mv)) {
                         let current_player = (history.len() & 1) == 0;
@@ -337,7 +345,7 @@ fn main() {
             }
             "undo" => {
                 if let Some((last_board, last_move)) = history.pop() {
-                    if last_move == NULL_MOVE {
+                    if history.is_empty() {
                         history.push((last_board, last_move));
                         println!("undo stackempty");
                     } else {

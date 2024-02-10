@@ -55,6 +55,10 @@ with the following graphical representation.
 ZONE: NE
 ```
 
+Upon startup, when the engine has finished preparing, it will send `ready` to output.
+
+The following are commands that the engine will accept as input.
+
 ### newgame
 
 Takes a position string as an argument.
