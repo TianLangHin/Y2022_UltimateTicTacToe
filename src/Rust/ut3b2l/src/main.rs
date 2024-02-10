@@ -1,4 +1,4 @@
-use std::io::{stdin, stdout, Write};
+use std::io::stdin;
 use std::time::Instant;
 
 use crate::engine::*;
@@ -253,7 +253,6 @@ fn main() {
 
     loop {
         command_string = String::new();
-        let _ = stdout().flush();
         match stdin().read_line(&mut command_string) {
             Ok(_) => {
                 command = command_string
