@@ -7,7 +7,7 @@ by the [Universal Chess Interface](https://en.wikipedia.org/wiki/Universal_Chess
 
 Throughout the life of the program, it will store the history of the current game
 as a sequence of board and move pairs. The very first entry in this sequence will
-always be the chosen starting position and a null move (represented by the `NULL_MOVE` value internally.
+always be the chosen starting position and a null move (represented by the `NULL_MOVE` value internally).
 
 Currently, it only takes input when it is not thinking. This will be fixed in later versions.
 
