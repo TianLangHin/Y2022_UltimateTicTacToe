@@ -36,11 +36,6 @@ const CENTRE_MASK: u64 = 0b_000_010_000;
 // to indicate that the player can play in any zone.
 pub const ZONE_ANY: u64 = 9;
 
-// Arrays to readily convert integers in the 0-8 range to the
-// name of their corresponding zone.
-pub const ZONE_ARRAY_UPPER: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
-pub const ZONE_ARRAY_LOWER: [&str; 9] = ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"];
-
 // Since values 0-80 are best used for move representation,
 // 81 is used to represent a "null move".
 pub const NULL_MOVE: Move = 81;

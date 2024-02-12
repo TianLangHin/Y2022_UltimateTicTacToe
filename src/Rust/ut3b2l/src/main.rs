@@ -5,6 +5,11 @@ use crate::engine::*;
 
 pub mod engine;
 
+// Arrays to readily convert integers in the 0-8 range to the
+// name of their corresponding zone.
+const ZONE_ARRAY_UPPER: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
+const ZONE_ARRAY_LOWER: [&str; 9] = ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"];
+
 // Used to output an ASCII art representation of the board.
 fn print_board(board: Board) {
     // Destructure and retrieve values from board.
