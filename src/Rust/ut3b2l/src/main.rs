@@ -276,9 +276,7 @@ fn main() {
                     println!("newgame invalid args");
                     continue;
                 }
-                let cells = &command[1];
-                let zone = &command[2];
-                if let Some(new_board) = board_from_string(&format!("{} {}", cells, zone)) {
+                if let Some(new_board) = board_from_string(&format!("{} {}", &command[1], &command[2])) {
                     history.clear();
                     history.push((new_board, NULL_MOVE));
                     println!("newgame ok");
