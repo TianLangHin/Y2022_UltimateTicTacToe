@@ -285,8 +285,9 @@ fn main() {
                 }
             }
             "go" => {
-                if command.is_empty() {
+                if command.len() < 2 {
                     println!("info error no depth");
+                    continue;
                 }
                 let current_player = (history.len() & 1) == 0;
                 if let Ok(depth) = command[1].parse::<usize>() {
