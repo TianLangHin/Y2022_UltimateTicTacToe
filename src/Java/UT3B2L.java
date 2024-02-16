@@ -285,7 +285,7 @@ public class UT3B2L {
                             "info depth %d pv %s eval %s time %d",
                             depth,
                             String.join(" ", movesAsStringList(line)),
-                            evalString(pair.score(), currentPlayer),
+                            evalString(pair.score(), depth),
                             end - start
                         );
                         System.out.println();
