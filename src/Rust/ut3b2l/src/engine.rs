@@ -42,7 +42,9 @@ pub const NULL_MOVE: Move = 81;
 
 // The absolute upper bound of total plies for this game is 81,
 // since there are exactly 81 places that can be played.
-pub const MAX_PLY: usize = 81;
+// However, we select a lower number to balance the amount of unused
+// storage in the stack against a flexible upper bound of total depth searchable.
+pub const MAX_PLY: usize = 32;
 
 /**
  * Due to the potential unreadability of an if-block in an arithmetic expression,
@@ -234,7 +236,6 @@ pub fn init() -> (Vec<i32>, Vec<i32>) {
 // only to be iterated over again in the functions it is used in,
 // this function instead returns an iterator trait object.
 pub fn generate_moves(board: Board) -> impl Iterator<Item = Move> {
-
     // This function uses an enum to wrap all the iterators returned
     // and implements Iterator for it, exactly how auto_enums would.
     enum LegalMoves<_T1, _T2, _T3> {

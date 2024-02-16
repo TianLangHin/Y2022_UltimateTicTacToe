@@ -245,7 +245,6 @@ fn board_from_string(board_string: &str) -> Option<Board> {
 }
 
 fn main() {
-
     let tables = init();
     println!("ready");
 
@@ -276,7 +275,9 @@ fn main() {
                     println!("newgame invalid args");
                     continue;
                 }
-                if let Some(new_board) = board_from_string(&format!("{} {}", &command[1], &command[2])) {
+                if let Some(new_board) =
+                    board_from_string(&format!("{} {}", &command[1], &command[2]))
+                {
                     history.clear();
                     history.push((new_board, NULL_MOVE));
                     println!("newgame ok");
@@ -291,8 +292,12 @@ fn main() {
                 }
                 let current_player = (history.len() & 1) == 0;
                 if let Ok(depth) = command[1].parse::<usize>() {
-                    if depth == 0 {
+                    if depth <= 0 {
                         println!("info error invalid depth");
+                        continue;
+                    }
+                    if depth > MAX_PLY {
+                        println!("info error overflow depth");
                         continue;
                     }
                     let board = history.last().unwrap().0;
