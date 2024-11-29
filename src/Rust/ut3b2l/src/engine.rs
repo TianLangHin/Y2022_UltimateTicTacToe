@@ -463,7 +463,15 @@ pub fn alpha_beta(
 
     // Leaf node returns static evaluation and empty PV.
     if depth == 0 {
-        return (evaluate(board, side, tables), [NULL_MOVE; MAX_PLY]);
+        let eval = evaluate(board, side, tables);
+        // In this branch, we also check whether the evaluation is conclusive or not.
+        // If it is conclusive, we adjust it based on the number of moves to win/loss.
+        let adjusted_eval = match eval {
+            OUTCOME_WIN => eval - (max_depth - depth) as i32,
+            OUTCOME_LOSS => eval + (max_depth - depth) as i32,
+            _ => eval,
+        };
+        return (adjusted_eval, [NULL_MOVE; MAX_PLY]);
     }
 
     // Retrieve the iterator for move generation.
@@ -521,13 +529,13 @@ pub fn alpha_beta(
 
         // If the outcome is decisive (win or lose), we scale it inwards
         // by the number of plies it will take to reach the conclusion.
-        match eval {
-            OUTCOME_WIN => (eval - (max_depth - depth) as i32, [NULL_MOVE; MAX_PLY]),
-            OUTCOME_LOSS => (eval + (max_depth - depth) as i32, [NULL_MOVE; MAX_PLY]),
-            // If the large grid does not give a win or loss
-            // but there are no legal moves, the game is drawn.
-            _ => (OUTCOME_DRAW, [NULL_MOVE; MAX_PLY]),
-        }
+        let adjusted_eval = match eval {
+            OUTCOME_WIN => eval - (max_depth - depth) as i32,
+            OUTCOME_LOSS => eval + (max_depth - depth) as i32,
+            _ => OUTCOME_DRAW,
+        };
+
+        (adjusted_eval, [NULL_MOVE; MAX_PLY])
         // The above implicit returns.
     }
 }
