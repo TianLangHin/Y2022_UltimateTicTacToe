@@ -229,16 +229,22 @@ fn board_from_string(board_string: &str) -> Option<Board> {
                 them |= 1 << i;
             }
         });
-    let first_seven = us | them;
-    let last_two = (share >> 18) | share;
+    let first_seven_us = us;
+    let first_seven_them = them;
     for i in 0..7 {
-        if line_presence(first_seven >> (9 * i)) {
+        if line_presence(first_seven_us >> (9 * i)) {
             share |= 1 << (36 + i);
+        } else if line_presence(first_seven_them >> (9 * i)) {
+            share |= 1 << (45 + i);
         }
     }
+    let last_two_us = share;
+    let last_two_them = share >> 18;
     for i in 7..9 {
-        if line_presence(last_two >> (9 * i - 63)) {
+        if line_presence(last_two_us >> (9 * i - 63)) {
             share |= 1 << (36 + i);
+        } else if line_presence(last_two_them >> (9 * i - 63)) {
+            share |= 1 << (45 + i);
         }
     }
     Some((us, them, share))
