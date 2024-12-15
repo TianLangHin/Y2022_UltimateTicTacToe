@@ -1,3 +1,6 @@
+// Used for initialising static lookup tables once upon first use.
+use std::sync::LazyLock;
+
 /**
  * The bitboard structure is represented here as a tuple of 3 `u64`s.
  * Though the elements do not have inherent names, all elements
@@ -109,6 +112,10 @@ pub const fn line_presence(grid: u64) -> bool {
         & (0b11101011 | (((grid >> 7) & 1) * 0xff))
         & (0b10011011 | (((grid >> 8) & 1) * 0xff)))
 }
+
+// The lookup tables required for the evaluation of a position
+// will be stored in this static variable.
+static TABLES: LazyLock<(Vec<i32>, Vec<i32>)> = LazyLock::new(|| init());
 
 /**
  * This function is to be executed at the very start, and only once,
@@ -385,11 +392,11 @@ pub fn play_move(board: Board, mv: Move, side: bool) -> Board {
  * This function uses the precomputed values from `init()`,
  * passed as a reference in its parameter.
  */
-pub fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 {
+pub fn evaluate(board: Board, side: bool) -> i32 {
     let (us, them, share) = board;
 
     // First, check the evaluation of the large grid.
-    let eval = tables.0[((share >> 36) & DBLCHUNK) as usize];
+    let eval = (*TABLES).0[((share >> 36) & DBLCHUNK) as usize];
 
     // If the large grid has reached a decisive result, the game is over,
     // with either a win or loss depending on the side currently evaluating this position.
@@ -424,8 +431,7 @@ pub fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 
                     0
                 } else {
                     // Incrementally add the precomputed evaluation of the small grid.
-                    tables.1[((them_data << 9) | us_data) as usize]
-                }
+                    (*TABLES).1[((them_data << 9) | us_data) as usize] }
             })
             .chain((7..9).map(|i| {
                 let us_data = (share >> (9 * i - 63)) & CHUNK;
@@ -434,7 +440,7 @@ pub fn evaluate(board: Board, side: bool, tables: &(Vec<i32>, Vec<i32>)) -> i32 
                 if ((large >> i) & 1) == 1 || (us_data | them_data) == CHUNK {
                     0
                 } else {
-                    tables.1[((them_data << 9) | us_data) as usize]
+                    (*TABLES).1[((them_data << 9) | us_data) as usize]
                 }
             }))
             .fold(eval, |acc, x| acc + x),
@@ -454,7 +460,6 @@ pub fn alpha_beta(
     depth: usize,
     mut alpha: i32, // The `alpha` variable will be updated throughout, and is cheaply copied.
     beta: i32,
-    tables: &(Vec<i32>, Vec<i32>),
     max_depth: usize,
 ) -> (i32, [u64; MAX_PLY]) {
     // It is not always necessary to destructure the board,
@@ -463,7 +468,7 @@ pub fn alpha_beta(
 
     // Leaf node returns static evaluation and empty PV.
     if depth == 0 {
-        let eval = evaluate(board, side, tables);
+        let eval = evaluate(board, side);
         // In this branch, we also check whether the evaluation is conclusive or not.
         // If it is conclusive, we adjust it based on the number of moves to win/loss.
         let adjusted_eval = match eval {
@@ -492,7 +497,6 @@ pub fn alpha_beta(
                 depth - 1,
                 -beta,
                 -alpha,
-                tables,
                 max_depth,
             );
 
@@ -525,7 +529,7 @@ pub fn alpha_beta(
         // this position has no legal moves, and thus the game is over.
 
         // We need only to check the evaluation of the large grid.
-        let eval = toggle_eval(side, tables.0[((board.2 >> 36) & DBLCHUNK) as usize]);
+        let eval = toggle_eval(side, (*TABLES).0[((board.2 >> 36) & DBLCHUNK) as usize]);
 
         // If the outcome is decisive (win or lose), we scale it inwards
         // by the number of plies it will take to reach the conclusion.

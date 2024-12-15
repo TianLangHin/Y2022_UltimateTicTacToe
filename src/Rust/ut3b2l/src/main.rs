@@ -251,15 +251,14 @@ fn board_from_string(board_string: &str) -> Option<Board> {
 }
 
 fn main() {
-    let tables = init();
-    println!("ready");
-
     let mut history: Vec<(Board, Move)> = Vec::new();
 
     history.push(((0, 0, ZONE_ANY << 54), NULL_MOVE));
 
     let mut command_string: String;
     let mut command: Vec<String>;
+
+    println!("ready");
 
     loop {
         command_string = String::new();
@@ -314,7 +313,6 @@ fn main() {
                         depth,
                         OUTCOME_LOSS,
                         OUTCOME_WIN,
-                        &tables,
                         depth,
                     );
                     let duration = start.elapsed().as_millis();
