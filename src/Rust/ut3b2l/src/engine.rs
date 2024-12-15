@@ -1,6 +1,9 @@
 // Used for initialising static lookup tables once upon first use.
 use std::sync::LazyLock;
 
+// Used for returning opaque iterator types in legal move generation.
+use auto_enums::auto_enum;
+
 /**
  * The bitboard structure is represented here as a tuple of 3 `u64`s.
  * Though the elements do not have inherent names, all elements
@@ -242,49 +245,12 @@ pub fn init() -> (Vec<i32>, Vec<i32>) {
 // To avoid running `.collect()` once every time a move list is generated
 // only to be iterated over again in the functions it is used in,
 // this function instead returns an iterator trait object.
+#[auto_enum(Iterator)]
 pub fn generate_moves(board: Board) -> impl Iterator<Item = Move> {
-    // This function uses an enum to wrap all the iterators returned
-    // and implements Iterator for it, exactly how auto_enums would.
-    enum LegalMoves<_T1, _T2, _T3> {
-        NoMoves,
-        AllZones(_T1),
-        FirstSeven(_T2),
-        LastTwo(_T3),
-    }
-
-    impl<_T1, _T2, _T3> Iterator for LegalMoves<_T1, _T2, _T3>
-    where
-        _T1: Iterator,
-        _T2: Iterator<Item = <_T1 as Iterator>::Item>,
-        _T3: Iterator<Item = <_T1 as Iterator>::Item>,
-    {
-        type Item = <_T1 as Iterator>::Item;
-
-        #[inline]
-        fn next(&mut self) -> Option<Self::Item> {
-            match self {
-                Self::NoMoves => None,
-                Self::AllZones(x) => x.next(),
-                Self::FirstSeven(x) => x.next(),
-                Self::LastTwo(x) => x.next(),
-            }
-        }
-
-        #[inline]
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            match self {
-                Self::NoMoves => (0, Some(0)),
-                Self::AllZones(x) => x.size_hint(),
-                Self::FirstSeven(x) => x.size_hint(),
-                Self::LastTwo(x) => x.size_hint(),
-            }
-        }
-    }
-
     let (us, them, share) = board;
 
     if line_presence(share >> 36) || line_presence(share >> 45) {
-        return LegalMoves::NoMoves;
+        return std::iter::empty();
     }
 
     // Extract the zone to be played from the board.
@@ -300,29 +266,23 @@ pub fn generate_moves(board: Board) -> impl Iterator<Item = Move> {
             let s_to_se = (share >> 18) | share;
             let large = (share >> 36) | (share >> 45);
 
-            LegalMoves::AllZones(
-                (0..63)
-                    .filter(move |i| ((nw_to_sw >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0)
-                    .chain((63..81).filter(move |i| {
-                        ((s_to_se >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
-                    })),
-            )
+            (0..63)
+                .filter(move |i| ((nw_to_sw >> i) & 1) == 0 && ((large >> (i / 9)) & 1) == 0)
+                .chain((63..81).filter(move |i| {
+                    ((s_to_se >> (i - 63)) & 1) == 0 && ((large >> (i / 9)) & 1) == 0
+                }))
         }
 
         // For zones S and SE, we access `share`.
         7 | 8 => {
             let s_to_se = (share >> 18) | share;
-            LegalMoves::LastTwo(
-                (9 * zone..9 * zone + 9).filter(move |i| ((s_to_se >> (i - 63)) & 1) == 0),
-            )
+            (9 * zone..9 * zone + 9).filter(move |i| ((s_to_se >> (i - 63)) & 1) == 0)
         }
 
         // For zones NW to SW, we access `us` and `them`.
         _ => {
             let nw_to_sw = us | them;
-            LegalMoves::FirstSeven(
-                (9 * zone..9 * zone + 9).filter(move |i| ((nw_to_sw >> i) & 1) == 0),
-            )
+            (9 * zone..9 * zone + 9).filter(move |i| ((nw_to_sw >> i) & 1) == 0)
         }
     }
 }
