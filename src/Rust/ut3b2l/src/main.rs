@@ -343,7 +343,7 @@ fn main() {
                     println!("move pos {}", board_string(last_board));
                 } else if let Some(mv) = move_from_string(&command[1]) {
                     let board = history.last().unwrap().0;
-                    if Option::is_some(&generate_moves(board).find(|&m| m == mv)) {
+                    if generate_moves(board).find(|&m| m == mv).is_some() {
                         let current_player = (history.len() & 1) == 0;
                         let new_board = play_move(board, mv, current_player);
                         history.push((new_board, mv));
