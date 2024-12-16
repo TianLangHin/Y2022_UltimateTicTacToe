@@ -250,8 +250,15 @@ public class Engine {
 
     public ScoreLinePair alphaBeta(Board board, int side, int depth, int alpha, int beta, int maxDepth) {
 
-        if (depth == 0)
-            return new ScoreLinePair(evaluate(board, side), new int[maxDepth]);
+        if (depth == 0) {
+            int adjustedEval = evaluate(board, side);
+            if (adjustedEval == OUTCOME_WIN) {
+                adjustedEval -= maxDepth - depth;
+            } else if (adjustedEval == OUTCOME_LOSS) {
+                adjustedEval += maxDepth - depth;
+            }
+            return new ScoreLinePair(adjustedEval, new int[maxDepth]);
+        }
 
         ArrayList<Integer> moveList = generateMoves(board);
 

@@ -118,9 +118,9 @@ public class UT3B2L {
                 }
                 for (Integer idx : rowIndices) {
                     if (idx > 62) {
-                        if (((share >> (i - 63)) & 1) == 1)
+                        if (((share >> (idx - 63)) & 1) == 1)
                             sb.append('x');
-                        else if (((share >> (i - 45)) & 1) == 1)
+                        else if (((share >> (idx - 45)) & 1) == 1)
                             sb.append('o');
                         else
                             sb.append('.');
@@ -168,7 +168,7 @@ public class UT3B2L {
         String zone = cellAndZone[1];
         int z = -1;
         for (int i = 0; i < 9; ++i) {
-            if (ZONE_ARRAY_LOWER[i] == zone)
+            if (ZONE_ARRAY_LOWER[i].equals(zone))
                 z = i;
         }
         if (z != -1)
@@ -193,11 +193,9 @@ public class UT3B2L {
             }
         }
         decompressedString = cell.replace("/", "");
-        int i;
-        char c;
         for (int j = 0; j < decompressedString.length(); ++j) {
-            c = decompressedString.charAt(j);
-            i = rowIndices.get(j);
+            char c = decompressedString.charAt(j);
+            int i = rowIndices.get(j);
             if (i > 62) {
                 if (c == 'x')
                     share |= 1L << (i - 63);
@@ -208,15 +206,21 @@ public class UT3B2L {
             else if (c == 'o')
                 them |= 1L << i;
         }
-        long firstSeven = us | them;
-        long lastTwo = (share >> 18) | share;
-        for (i = 0; i < 7; ++i) {
-            if (Engine.linePresence(firstSeven >> (9*i)))
+        long firstSevenUs = us;
+        long firstSevenThem = them;
+        for (int i = 0; i < 7; ++i) {
+            if (Engine.linePresence(firstSevenUs >> (9 * i)))
                 share |= 1L << (36 + i);
+            else if (Engine.linePresence(firstSevenThem >> (9 * i)))
+                share |= 1L << (45 + i);
         }
-        for (i = 7; i < 9; ++i) {
-            if (Engine.linePresence(lastTwo >> (9*i - 63)))
+        long lastTwoUs = share;
+        long lastTwoThem = share >> 18;
+        for (int i = 7; i < 9; ++i) {
+            if (Engine.linePresence(lastTwoUs >> (9*i - 63)))
                 share |= 1L << (36 + i);
+            else if (Engine.linePresence(lastTwoThem >> (9*i - 63)))
+                share |= 1L << (45 + i);
         }
         return new Board(us, them, share);
     }
@@ -290,12 +294,14 @@ public class UT3B2L {
                         );
                         System.out.println();
 
-                        history.add(
-                            new BoardMovePair(
-                                engine.playMove(board, line[0], currentPlayer),
-                                line[0]
-                            )
-                        );
+                        if (line.length > 0) {
+                            history.add(
+                                new BoardMovePair(
+                                    engine.playMove(board, line[0], currentPlayer),
+                                    line[0]
+                                )
+                            );
+                        }
 
                     } catch (NumberFormatException err) {
                         System.out.println("info error invalid depth");
