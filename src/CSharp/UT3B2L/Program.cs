@@ -7,13 +7,15 @@ using System.Runtime.CompilerServices;
 // This program uses a bitboard-like representation to represent the state of the game.
 using Board = System.ValueTuple<ulong,ulong,ulong>;
 
+using Move = System.Int32;
+
 class UT3B2L
 {
     // Weights for representing win, loss and draw outcomes.
     const int INFINITY = 1000000;
-    const int OUTCOME_WIN = INFINITY;
+    public const int OUTCOME_WIN = INFINITY;
     const int OUTCOME_DRAW = 0;
-    const int OUTCOME_LOSS = -INFINITY;
+    public const int OUTCOME_LOSS = -INFINITY;
 
     // Weights for line scoring.
     const int BIG_TWO_COUNT   = 90;
@@ -28,7 +30,11 @@ class UT3B2L
     const int SQ_BIG = 25;
 
     // Internal representation for *zone* value when the player can play in any zone.
-    const int ZONE_ANY = 9;
+    public const int ZONE_ANY = 9;
+
+    // 81 is used to represent a "null move"
+    // since values 0-80 are best used for move representation.
+    public const Move NULL_MOVE = 81;
 
     // Masks for use in changing bitboards
     const ulong LINE        = 0b_111UL;
@@ -44,6 +50,11 @@ class UT3B2L
 
     // Variable to contain the searching depth of the main AlphaBeta call.
     int SEARCHING_DEPTH;
+
+    public void SetSearchingDepth(int depth)
+    {
+        SEARCHING_DEPTH = depth;
+    }
 
     // Initialise PopCount lookup table by inserting bit count of each number
     // from 0 to 511 in the corresponding index in the array.
@@ -138,104 +149,117 @@ class UT3B2L
         );
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    bool LinePresence(ulong grid)
+    {
+        return 0 != (
+            (0b10110110L | ((grid & 1) * 0xffL)) &
+            (0b11101110L | (((grid >> 1) & 1) * 0xffL)) &
+            (0b01011110L | (((grid >> 2) & 1) * 0xffL)) &
+            (0b11110101L | (((grid >> 3) & 1) * 0xffL)) &
+            (0b00101101L | (((grid >> 4) & 1) * 0xffL)) &
+            (0b11011101L | (((grid >> 5) & 1) * 0xffL)) &
+            (0b01110011L | (((grid >> 6) & 1) * 0xffL)) &
+            (0b11101011L | (((grid >> 7) & 1) * 0xffL)) &
+            (0b10011011L | (((grid >> 8) & 1) * 0xffL))
+        );
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    int ToggleShift(bool side, int num) {
+        return side ? num : 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    int ToggleEval(bool side, int num) {
+        return side ? -num : num;
+    }
+
     // The functions in this program all assume that we are starting with a valid board position.
     // Only valid positions will be reached if the program only ever uses its own functions to
     // play moves on the boards.
 
-    List<int> GenerateMoves(Board board)
+    public List<int> GenerateMoves(Board board)
     {
         (ulong us, ulong them, ulong share) = board;
 
-        int i; // variable counter to be used potentially in multiple for loops in one pass
+        if (LinePresence(share >> 36) || LinePresence(share >> 45))
+            return new List<int>();
 
-        // The variables `data1` and `data2` are reused to save memory.
-        // They serve different purposes in different parts of this function.
+        int zone = (int)((share >> 54) & 0b1111);
 
-        ulong data1 = Lines((share >> 36) & CHUNK); // Contains all big grid lines for X
-        ulong data2 = Lines((share >> 45) & CHUNK); // Contains all big grid lines for O
-
-        // If either X or O has made a big grid three-in-a-row, the game is over.
-        for (i = 0; i < 24; i += 3)
-            if (((data1 >> i) & LINE) == LINE || ((data2 >> i) & LINE) == LINE)
-                return new List<int>();
-
-        List<int> moveList = new List<int>(); // List for all legal moves, to be returned.
-
-        // Now, the variables *data1* and *data2* are being reused.
-
-        data1 = us | them;                           // Contains all occupancies in zones NW to SW
-        data2 = ((share >> 18) | share) & DBLCHUNK;  // Contains all occupancies in zones S to SE
-        ulong large = ((share >> 36) | (share >> 45)) & CHUNK; // Contains all occupancies in big grid
-
-        int zone = (int)((share >> 54) & 0b1111); // Determine zone the player is allowed to play in
+        List<int> moveList = new List<int>();
 
         switch (zone)
         {
-            // If the player is allowed to play in any zone they wish, select all blank squares
-            // that are not in a zone that has a corresponding occupied large grid.
             case ZONE_ANY:
-                // The iteration over all squares has to be done separately due to the Board format.
-                for (i = 0; i < 63; ++i)
-                    if (((data1 >> i) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
+            {
+                ulong nwToSw = us | them;
+                ulong sToSe = (share >> 18) | share;
+                ulong large = (share >> 36) | (share >> 45);
+
+                for (int i = 0; i < 63; ++i)
+                    if (((nwToSw >> i) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
                         moveList.Add(i);
-                for (; i < 81; ++i)
-                    if (((data2 >> (i-63)) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
+                for (int i = 63; i < 81; ++i)
+                    if (((sToSe >> (i - 63)) & 1) == 0 && ((large >> (i/9)) & 1) == 0)
                         moveList.Add(i);
                 break;
-
-            // In the following, we will assume that the `zone` value given corresponds to a zone that
-            // does not correspond to an occupied space in the large grid.
-
-            // Zones S and SE have to be dealt with separately due to the Board format.
+            }
             case 7: case 8:
-                zone *= 9; // Since only the value of `9*zone` will be used from here on, update `zone` itself.
-                // Bitshift right to make relevant zone equal to the LSB 9 bits.
-                data2 >>= zone - 63; // Since we are accessing `share`, we bishift right by 63 less.
-                for (i = 0; i < 9; ++i)
-                    if (((data2 >> i) & 1) == 0)
+            {
+                zone *= 9;
+                ulong sToSe = ((share >> 18) | share) >> (zone - 63);
+                for (int i = 0; i < 9; ++i)
+                    if (((sToSe >> i) & 1) == 0)
                         moveList.Add(zone + i);
                 break;
-
+            }
             default:
-                zone *= 9; // Since only the value of `9*zone` will be used from here on, update `zone` itself.
-                data1 >>= zone; // Bitshift right to make relevant zone equal to the LSB 9 bits.
-                for (i = 0; i < 9; ++i)
-                    if (((data1 >> i) & 1) == 0)
+            {
+                zone *= 9;
+                ulong nwToSw = (us | them) >> zone;
+                for (int i = 0; i < 9; ++i)
+                    if (((nwToSw >> i) & 1) == 0)
                         moveList.Add(zone + i);
                 break;
+            }
         }
 
-        return moveList; // Return list of legal moves.
+        return moveList;
     }
 
     // Returns the new board state after the given move has been played by the given side.
     // This will not affect the value of the board passed into this function.
-    Board PlayMove(Board board, int move, int side) // side = 0 if player is X, 1 if player is O
+    // side = false if player is X, true if player is O
+    public Board PlayMove(Board board, int move, bool side)
     {
         (ulong us, ulong them, ulong share) = board;
 
-        ulong lines;     // This will contain our line occupancies of the zone we place in this move.
-        ulong nextChunk; // This will contain all occupancies of the next zone to play in.
+        bool lineOccupancy;
+        ulong nextChunk;
 
-        // If in the zone S or SE, we update *share*. Otherwise, update *us* or *them*.
         if (move > 62)
         {
             // The relevant position is the square number - 63, then 18 places further if O is playing.
-            share |= 1UL << (move - 63 + 18*side);
+            share |= 1UL << (move - 63 + ToggleShift(side, 18));
             // Relevant zone is INT(move / 9), so we bitshift by `9*zone - 63` to get correct zone,
             // once again offsetting by 18 if player O is playing.
-            lines = Lines((share >> (9*(move / 9) - 63 + 18*side)) & CHUNK);
+            lineOccupancy = LinePresence((share >> (9*(move / 9) - 63 + ToggleShift(side, 18))) & CHUNK);
         }
-        else if (side == 0) // Player X is playing.
+        else if (!side) // Player X is playing.
         {
             us |= 1UL << move;
-            lines = Lines((us >> (9*(move / 9))) & CHUNK); // Find lines in relevant zone for this move.
+            lineOccupancy = LinePresence((us >> (9*(move / 9))) & CHUNK);
         }
         else // Player O is playing.
         {
             them |= 1UL << move;
-            lines = Lines((them >> (9*(move / 9))) & CHUNK); // Find lines in relevant zone for this move.
+            lineOccupancy = LinePresence((them >> (9*(move / 9))) & CHUNK);
         }
+
+        if (lineOccupancy)
+            share |= 1UL << (36 + ToggleShift(side, 9) + move / 9);
 
         // To locate the occupancies for the zone corresponding to the next move,
         // whether the zone will be S to SE or otherwise needs to be considered,
@@ -243,21 +267,6 @@ class UT3B2L
         nextChunk = move % 9 > 6 ?
             ((share | (share >> 18)) >> (9*((move % 9) - 7))) & CHUNK : // Access `share` if next zone is S or SE.
             ((us | them) >> (9*(move % 9))) & CHUNK; // Access `us` and `them` otherwise.
-
-        // For the lines in the zone we just filled, check to see if we have made a three-in-a-row.
-        // This is the only thing we need to check as we are assuming that we are starting from
-        // a valid position the whole time, and that the functions here are the only ones that
-        // have edited the value of the board.
-        bool lineNotWon = true;
-        for (int i = 0; i < 24 && lineNotWon; i += 3)
-            if (((lines >> i) & LINE) == LINE) // The LSB 3 bits represents one of the eight lines in the zone.
-                lineNotWon = false;
-
-        // Change large grid contents by updating the correct section of *share*.
-        // The correct bit position is 36 bits from LSB, then 0 to 8 positions left depending on move,
-        // then shifted another 9 spaces if the line is made by player O.
-        if (!lineNotWon)
-            share |= 1UL << (36 + 9*side + move/9);
 
         // Normally, the zone of the next move is determined by move % 9.
         // However, if that corresponding zone is completely filled, or
@@ -272,7 +281,7 @@ class UT3B2L
 
     // Heuristic for evaluating a particular board from the perspective of a particular side,
     // once the minimax reaches a depth = 0 or other leaf node.
-    int Evaluate(Board board, int side)
+    int Evaluate(Board board, bool side)
     {
         (ulong us, ulong them, ulong share) = board;
 
@@ -284,7 +293,7 @@ class UT3B2L
         int eval = EvalTableLarge[(share >> 36) & DBLCHUNK];
 
         if (eval == OUTCOME_WIN || eval == OUTCOME_LOSS)
-            return eval * (1 - (side << 1));
+            return ToggleEval(side, eval);
 
         ulong usData, themData;
         ulong large = ((share >> 36) | (share >> 45)) & CHUNK;
@@ -292,9 +301,8 @@ class UT3B2L
         if (large == CHUNK)
             return OUTCOME_DRAW;
 
-        int i;
         // Now, we loop through each of the 9 zones.
-        for (i = 0; i < 9; ++i)
+        for (int i = 0; i < 9; ++i)
         {
             // To avoid code duplication, we check for whether the zone is from NW to SW or S to SE,
             // as the representation for each requires separate handling.
@@ -316,18 +324,29 @@ class UT3B2L
 
             eval += EvalTableSmall[(themData << 9) | usData];
         }
-        return eval * (1 - (side << 1));
+        return ToggleEval(side, eval);
     }
 
     // The main alpha-beta minimax function. Returns evaluation and principal variation.
-    ValueTuple<int,int[]> AlphaBeta(Board board, int side, int depth, int alpha, int beta)
+    public ValueTuple<int,Move[]> AlphaBeta(Board board, bool side, int depth, int alpha, int beta)
     {
+        // Reached leaf node, so return static evaluation and empty PV.
+        if (depth == 0)
+        {
+            int adjustedEval = Evaluate(board, side);
+            if (adjustedEval == OUTCOME_WIN)
+                adjustedEval -= SEARCHING_DEPTH - depth;
+            else if (adjustedEval == OUTCOME_LOSS)
+                adjustedEval += SEARCHING_DEPTH - depth;
+            return (adjustedEval, new int[SEARCHING_DEPTH]);
+        }
+
         List<int> moveList = GenerateMoves(board); // Find all legal moves.
         int eval;
 
         if (moveList.Count() == 0) // If there are no legal moves, the game is over.
         {
-            eval = EvalTableLarge[(board.Item3 >> 36) & DBLCHUNK] * (1 - (side << 1));
+            eval = ToggleEval(side, EvalTableLarge[(board.Item3 >> 36) & DBLCHUNK]);
             if (eval == OUTCOME_WIN)
                 eval -= SEARCHING_DEPTH - depth;
             else if (eval == OUTCOME_LOSS)
@@ -337,10 +356,6 @@ class UT3B2L
             return (eval, new int[SEARCHING_DEPTH - depth]); // Reached leaf node, so return empty PV.
         }
 
-        // Reached leaf node, so return static evaluation and empty PV.
-        if (depth == 0)
-            return (Evaluate(board, side), new int[SEARCHING_DEPTH]);
-
         int length = moveList.Count();
         int[] pv = new int[SEARCHING_DEPTH], line;
 
@@ -348,7 +363,7 @@ class UT3B2L
         for (int i = 0; i < length; ++i)
         {
             // Recursive minimax call, using negamax construct as evaluation is symmetric.
-            (eval, line) = AlphaBeta(PlayMove(board, moveList[i], side), ~side & 1, depth-1, -beta, -alpha);
+            (eval, line) = AlphaBeta(PlayMove(board, moveList[i], side), !side, depth-1, -beta, -alpha);
             // So, we take the negative of the evaluation.
             eval = -eval;
 
@@ -365,10 +380,10 @@ class UT3B2L
         return (alpha, pv); // Return evaluation of best option, and the matching PV.
     }
 
-    void PrintBoard(Board board)
+    public void PrintBoard(Board board)
     {
         string[] sqArr = {"NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"};
-    
+
         (ulong us, ulong them, ulong share) = board;
         int US = 1, THEM = -1;
 
@@ -421,10 +436,18 @@ class UT3B2L
             for (int j = 0; j < 9; j += 3)
             {
                 // Select top row, middle row, then bottom row from each of the grids
-                Console.WriteLine(string.Join("|",
+                Console.WriteLine(string.Join(
+                    "|",
                     (
-                        from grid in bigRow select
-                        string.Join("", (from smallRow in new ArraySegment<int>(grid, j, 3) select smallRow == US ? "X" : smallRow == THEM ? "O" : "."))
+                        from grid in bigRow
+                        select string.Join(
+                            "",
+                            (
+                                from smallRow in
+                                new ArraySegment<int>(grid, j, 3)
+                                select smallRow == US ? "X" : smallRow == THEM ? "O" : "."
+                            )
+                        )
                     )
                 ));
             }
@@ -438,11 +461,162 @@ class UT3B2L
         Console.WriteLine("ZONE: " + (zone == ZONE_ANY ? "ANY" : sqArr[zone]));
     }
 
+    public string BoardString(Board board)
+    {
+        string[] sqArr = {"nw", "n", "ne", "w", "c", "e", "sw", "s", "se"};
+
+        (ulong us, ulong them, ulong share) = board;
+        int zone = (int)((share >> 54) & 0b1111);
+        List<List<int>> cells = new List<List<int>>();
+        for (int i = 0; i < 81; i += 27)
+            for (int j = 0; j < 9; j += 3) {
+                List<int> row = new List<int>();
+                for (int k = 0; k < 27; k += 9)
+                    row.AddRange(new int[] {i+j+k, i+j+k+1, i+j+k+2});
+                cells.Add(row);
+            }
+
+        string cellString = string.Join(
+            "/",
+            (
+                from v in cells
+                select string.Join(
+                    "",
+                    (
+                        from i in v
+                        select
+                        i > 62 ?
+                        (
+                            ((share >> (i-63)) & 1) == 1 ? "x" :
+                            ((share >> (i-45)) & 1) == 1 ? "o" : "."
+                        ) :
+                        (
+                            ((us >> i) & 1) == 1 ? "x" :
+                            ((them >> i) & 1) == 1 ? "o" : "."
+                        )
+                    )
+                )
+            )
+        )
+            .Replace(".........", "9")
+            .Replace("........", "8")
+            .Replace(".......", "7")
+            .Replace("......", "6")
+            .Replace(".....", "5")
+            .Replace("....", "4")
+            .Replace("...", "3")
+            .Replace("..", "2")
+            .Replace(".", "1");
+
+        return cellString + " " + (zone == ZONE_ANY ? "any" : sqArr[zone]);
+    }
+
+    public Board? BoardFromString(string boardString)
+    {
+        (ulong us, ulong them, ulong share) = (0UL, 0UL, 0UL);
+        string decompressedString = boardString
+            .Replace("1", ".")
+            .Replace("2", "..")
+            .Replace("3", "...")
+            .Replace("4", "....")
+            .Replace("5", ".....")
+            .Replace("6", "......")
+            .Replace("7", ".......")
+            .Replace("8", "........")
+            .Replace("9", ".........");
+        string[] cellAndZone = decompressedString.Split();
+        if (cellAndZone.Length != 2)
+            return null;
+        string[] sqArr = {"nw", "n", "ne", "w", "c", "e", "sw", "s", "se"};
+        string cell = cellAndZone[0];
+        string zone = cellAndZone[1];
+        if (Array.IndexOf(sqArr, zone) != -1)
+        {
+            share |= (ulong)(Array.IndexOf(sqArr, zone)) << 54;
+        }
+        else if (zone == "any")
+        {
+            share |= (ulong)ZONE_ANY << 54;
+        }
+        else
+        {
+            return null;
+        }
+        string[] rows = cell.Split('/');
+        if (rows.Length != 9)
+        {
+            return null;
+        }
+        foreach (string row in rows)
+        {
+            if (row.Length != 9)
+                return null;
+        }
+        List<int> rowIndices = new List<int>();
+        for (int i = 0; i < 81; i += 27)
+            for (int j = 0; j < 9; j += 3)
+                for (int k = 0; k < 27; k += 9)
+                    rowIndices.AddRange(new int[] {i+j+k, i+j+k+1, i+j+k+2});
+        decompressedString = cell.Replace("/", "");
+        for (int j = 0; j < decompressedString.Length; ++j)
+        {
+            char c = decompressedString[j];
+            int i = rowIndices[j];
+            if (i > 62)
+            {
+                if (c == 'x')
+                    share |= 1UL << (i - 63);
+                else if (c == 'o')
+                    share |= 1UL << (i - 45);
+            }
+            else if (c == 'x')
+            {
+                us |= 1UL << i;
+            }
+            else if (c == 'o')
+            {
+                them |= 1UL << i;
+            }
+        }
+        ulong firstSevenUs = us;
+        ulong firstSevenThem = them;
+        for (int i = 0; i < 7; ++i)
+        {
+            if (LinePresence(firstSevenUs >> (9 * i)))
+                share |= 1UL << (36 + i);
+            else if (LinePresence(firstSevenThem >> (9 * i)))
+                share |= 1UL << (45 + i);
+        }
+        ulong lastTwoUs = share;
+        ulong lastTwoThem = share >> 18;
+        for (int i = 7; i < 9; ++i)
+        {
+            if (LinePresence(lastTwoUs >> (9*i - 63)))
+                share |= 1UL << (36 + i);
+            else if (LinePresence(lastTwoThem >> (9*i - 63)))
+                share |= 1UL << (45 + i);
+        }
+        return (us, them, share);
+    }
+
     // First part is the zone, second part is the spot within that zone's grid.
-    string MoveString(int move)
+    public string MoveString(int move)
     {
         string[] sqArr = {"nw", "n", "ne", "w", "c", "e", "sw", "s", "se"};
         return sqArr[move / 9] + "/" + sqArr[move % 9];
+    }
+
+    public Move MoveFromString(string moveString)
+    {
+        string[] zoneAndSquare = moveString.Split('/');
+        if (zoneAndSquare.Length != 2)
+        {
+            return NULL_MOVE;
+        }
+        string[] sqArr = {"nw", "n", "ne", "w", "c", "e", "sw", "s", "se"};
+        int zone = Array.IndexOf(sqArr, zoneAndSquare[0]);
+        int square = Array.IndexOf(sqArr, zoneAndSquare[1]);
+        return zone != -1 && square != -1 ? 9 * zone + square : NULL_MOVE;
     }
 
     // The evaluation score is always outputted in the following format:
@@ -452,125 +626,12 @@ class UT3B2L
     // "W": Meaning the AI has found a forced win, and the following number is the number of moves in which it will happen
     // "L": Meaning the AI has found the position to be a forced loss, and the following number is the number of moves in which it will happen
     // "D": Meaning the AI has found a draw, and the following number is always 0.
-    string EvalString(int eval)
+    public string EvalString(int eval)
     {
         return (eval <= OUTCOME_LOSS + SEARCHING_DEPTH) ? "L" + (eval - OUTCOME_LOSS) :
             (eval >= OUTCOME_WIN - SEARCHING_DEPTH) ? "W" + (OUTCOME_WIN - eval) :
             (eval == OUTCOME_DRAW) ? "D0" :
             (eval > 0 ? "+" : "-") + Math.Abs(eval).ToString();
-    }
-
-    // This function takes in the list of valid moves, and repeatedly prompts the player
-    // for a move until a valid one is inputted.
-    // This is made a separate function to prevent cluttering of the main game loop.
-    int InputPlayerMove(List<int> possibleMoves)
-    {
-        string strMove, zone, square;
-        string[] strSplit;
-        string[] sqArr = {"nw", "n", "ne", "w", "c", "e", "sw", "s", "se"};
-
-        // Move format is "{direction}/{direction}", where {direction} is one of: "nw", "n", "ne", "w", "c", "e", "sw", "s", "se".
-        Console.Write("Move: ");
-        strMove = Console.ReadLine() ?? "";
-        while (strMove == "")
-        {
-            Console.Write("Move: ");
-            strMove = Console.ReadLine() ?? "";
-        }
-
-        strSplit = strMove.Split('/');
-        zone = strSplit[0];
-        square = strSplit[1];
-        int move = 9 * Array.FindIndex(sqArr, (x => x == zone)) + Array.FindIndex(sqArr, (x => x == square)); // Convert string to integer move representation
-
-        while (!possibleMoves.Contains(move)) // Prompt for move until inputted move is legal
-        {
-            Console.Write("Move: ");
-            strMove = Console.ReadLine() ?? "";
-            while (strMove == "")
-            {
-                Console.Write("Move: ");
-                strMove = Console.ReadLine() ?? "";
-            }
-            strSplit = strMove.Split('/');
-            zone = strSplit[0];
-            square = strSplit[1];
-            move = 9 * Array.FindIndex(sqArr, (x => x == zone)) + Array.FindIndex(sqArr, (x => x == square));
-        }
-
-        return move;
-    }
-
-    // The main game loop to be executed.
-    public void Main(int depth, bool selfStart)
-    {
-        SEARCHING_DEPTH = depth;
-
-        // Starting values for an empty board. The zone is ZONE_ANY, as the first player can place anywhere.
-        Board board = (
-            0b0_000000000_000000000_000000000_000000000_000000000_000000000_000000000UL,
-            0b0_000000000_000000000_000000000_000000000_000000000_000000000_000000000UL,
-            0b000000_1001_000000000_000000000_000000000_000000000_000000000_000000000UL
-        );
-
-        int player = 0; // Player is playing X by default.
-        PrintBoard(board); // Print the starting position.
-
-        List<int> possibleMoves;
-
-        int eval, move;
-        int[] line;
-        List<string> strLines;
-
-        Stopwatch timer = new Stopwatch(); // The timer will show how many milliseconds each evaluation takes.
-
-        if (selfStart) // *selfStart* is true if the program is to play the first move. The player is thus playing O.
-        {
-            // Output evaluation, PV and new board state.
-            timer.Start();
-            (eval, line) = AlphaBeta(board, 0, SEARCHING_DEPTH, -INFINITY, INFINITY);
-            timer.Stop();
-            board = PlayMove(board, line[0], 0);
-            strLines = (from mv in line select MoveString(mv)).ToList();
-            Console.WriteLine("AI Move: " + strLines[0] + " PV: [" + string.Join(", ", strLines) + "] Eval: " + EvalString(eval) + " Time elapsed: " + timer.ElapsedMilliseconds + " ms");
-            player = 1; // Player is playing O.
-        }
-
-        PrintBoard(board);
-
-        while (true)
-        {
-            possibleMoves = GenerateMoves(board);
-            if (possibleMoves.Count() == 0)
-            {
-                Console.WriteLine("Game over");
-                Console.ReadLine();
-                break;
-            }
-
-            // Input player move
-            move = InputPlayerMove(possibleMoves);
-
-            // Play the inputted (and validated) move.
-            board = PlayMove(board, move, player);
-            PrintBoard(board);
-            if (GenerateMoves(board).Count() == 0)
-            {
-                Console.WriteLine("Game over");
-                Console.ReadLine();
-                break;
-            }
-
-            // Output evaluation, PV and new board state.
-            timer.Reset();
-            timer.Start();
-            (eval, line) = AlphaBeta(board, ~player & 1, SEARCHING_DEPTH, -INFINITY, INFINITY);
-            timer.Stop();
-            board = PlayMove(board, line[0], ~player & 1);
-            strLines = (from mv in line select MoveString(mv)).ToList();
-            Console.WriteLine("AI Move: " + strLines[0] + " PV: [" + string.Join(", ", strLines) + "] Eval: " + EvalString(eval) + " Time elapsed: " + timer.ElapsedMilliseconds + " ms");
-            PrintBoard(board);
-        }
     }
 }
 
@@ -580,16 +641,163 @@ class Program
     {
         UT3B2L ut3b2l = new UT3B2L();
 
-        // Input the depth for this program to work at.
-        int depth;
-        Console.Write("Depth: ");
-        while (!int.TryParse(Console.ReadLine(), out depth))
-            Console.Write("Depth: ");
+        Console.WriteLine("ready");
 
-        // Press '1' for program to play first ("X"), press '2' for program to play second ("O")
-        char c;
-        while ((c = Console.ReadKey(true).KeyChar) != '1' && c != '2') {}
-        Console.WriteLine("Playing " + (c == '1' ? "X" : "O"));
-        ut3b2l.Main(depth, c == '1');
+        List<(Board,Move)> history = new List<(Board,Move)>();
+
+        Board startBoard = (
+            0b0_000000000_000000000_000000000_000000000_000000000_000000000_000000000UL,
+            0b0_000000000_000000000_000000000_000000000_000000000_000000000_000000000UL,
+            0b000000_1001_000000000_000000000_000000000_000000000_000000000_000000000UL
+        );
+        history.Add((startBoard, UT3B2L.NULL_MOVE));
+
+        Stopwatch timer = new Stopwatch();
+
+        bool runMainLoop = true;
+
+        while (runMainLoop)
+        {
+            string commandString = Console.ReadLine() ?? "";
+            string[] command = commandString.Split();
+
+            if (command.Length == 0)
+            {
+                continue;
+            }
+
+            bool currentPlayer;
+
+            switch (command[0])
+            {
+                case "newgame":
+                    if (command.Length < 3)
+                    {
+                        Console.WriteLine("newgame invalid args");
+                        continue;
+                    }
+                    Board? newStartingBoard = ut3b2l.BoardFromString(command[1] + " " + command[2]);
+                    if (newStartingBoard != null)
+                    {
+                        history.Clear();
+                        history.Add((newStartingBoard.Value, UT3B2L.NULL_MOVE));
+                        Console.WriteLine("newgame ok");
+                    }
+                    else
+                    {
+                        Console.WriteLine("newgame invalid pos");
+                    }
+                    break;
+                case "go":
+                    if (command.Length < 2)
+                    {
+                        Console.WriteLine("info error no depth");
+                        continue;
+                    }
+                    currentPlayer = (history.Count & 1) == 0;
+                    int depth;
+                    if (int.TryParse(command[1], out depth))
+                    {
+                        if (depth <= 0)
+                        {
+                            Console.WriteLine("info error invalid depth");
+                            continue;
+                        }
+                        // There is no limit other than negative of zero depth here.
+                        Board board = history.Last().Item1;
+                        ut3b2l.SetSearchingDepth(depth);
+                        timer.Reset();
+                        timer.Start();
+                        (int eval, Move[] line) = ut3b2l.AlphaBeta(
+                            board,
+                            currentPlayer,
+                            depth,
+                            UT3B2L.OUTCOME_LOSS,
+                            UT3B2L.OUTCOME_WIN
+                        );
+                        timer.Stop();
+                        long duration = timer.ElapsedMilliseconds;
+                        Console.WriteLine(
+                            "info depth " + depth +
+                            " pv " +
+                            string.Join(" ", (from m in line select ut3b2l.MoveString(m))) +
+                            " eval " + ut3b2l.EvalString(eval) +
+                            " time " + duration
+                        );
+                        if (line.Length != 0)
+                            history.Add((ut3b2l.PlayMove(board, line[0], currentPlayer), line[0]));
+                    }
+                    else
+                    {
+                        Console.WriteLine("info error invalid depth");
+                    }
+                    break;
+                case "play":
+                    if (command.Length != 2)
+                    {
+                        Console.WriteLine("move invalid");
+                        continue;
+                    }
+                    if (command[1] == "null")
+                    {
+                        (Board lastBoard, Move lastMove) = history.Last();
+                        history.Add((lastBoard, lastMove));
+                        Console.WriteLine("move pos " + ut3b2l.BoardString(lastBoard));
+                        continue;
+                    }
+                    Move move = ut3b2l.MoveFromString(command[1]);
+                    if (move != UT3B2L.NULL_MOVE)
+                    {
+                        Board board = history.Last().Item1;
+                        if (ut3b2l.GenerateMoves(board).Contains(move))
+                        {
+                            currentPlayer = (history.Count & 1) == 0;
+                            Board newBoard = ut3b2l.PlayMove(board, move, currentPlayer);
+                            history.Add((newBoard, move));
+                            Console.WriteLine("move pos " + ut3b2l.BoardString(newBoard));
+                        }
+                        else
+                        {
+                            Console.WriteLine("move illegal");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("move invalid");
+                    }
+                    break;
+                case "undo":
+                    (Board,Move)? item = history.LastOrDefault();
+                    if (item != null)
+                    {
+                        if (item == (startBoard, UT3B2L.NULL_MOVE))
+                        {
+                            Console.WriteLine("undo stackempty");
+                        }
+                        else
+                        {
+                            history.RemoveAt(history.Count - 1);
+                            Console.WriteLine("undo ok");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("undo stackempty");
+                    }
+                    break;
+                case "gamepos":
+                    Console.WriteLine(ut3b2l.BoardString(history.Last().Item1));
+                    break;
+                case "d":
+                    ut3b2l.PrintBoard(history.Last().Item1);
+                    break;
+                case "q":
+                    runMainLoop = false;
+                    break;
+                default:
+                    Console.WriteLine("badkeyword");
+                    break;
+            }
+        }
     }
 }
